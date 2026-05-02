@@ -1,0 +1,42 @@
+name: Release Deploy
+
+on:
+  release:
+    types: [published]
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: release-deploy-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  vercel-production:
+    name: Deploy release tag to Vercel
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/v')
+    env:
+      VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID || secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID || secrets.VERCEL_PROJECT_ID }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+    steps:
+      - name: Checkout release ref
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.release.tag_name || github.ref_name }}
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Pull Vercel environment
+        run: bunx vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+
+      - name: Build with Vercel
+        run: bunx vercel build --prod --token="$VERCEL_TOKEN"
+
+      - name: Deploy prebuilt output
+        run: bunx vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN"
