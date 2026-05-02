@@ -110,6 +110,14 @@ export interface UserState {
   todayPoolGained: number;
   welcomeGrantedUserIds: string[];
 
+  /**
+   * Local clock value of the most recent successful saveToCloud (or the
+   * cloud `savedAt` we last loaded). Drives LWW: on app open we only
+   * overwrite local with cloud when `cloud.savedAt > local.lastSavedAt`.
+   * 0 means "never synced from this device".
+   */
+  lastSavedAt: number;
+
   // Persistent collections
   pomodoroHistory: PomodoroRecord[];
   tokenHistory: TokenLedgerEntry[];

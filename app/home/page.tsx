@@ -7,6 +7,12 @@ import { SettleSheet } from "@/components/sheets/SettleSheet";
 import { RunningView } from "@/components/home/RunningView";
 import { useStore, todayKey } from "@/lib/store";
 import { startPushChain, cancelPushChain } from "@/app/actions/push";
+import {
+  setActiveSession,
+  clearActiveSession,
+} from "@/app/actions/active-session";
+import { useActiveSession } from "@/lib/use-active-session";
+import { RemoteActiveView } from "@/components/home/RemoteActiveView";
 
 const POMO_MS = 25 * 60 * 1000;
 
@@ -33,6 +39,7 @@ export default function HomePage() {
   const [openStart, setOpenStart] = useState(false);
   const [openSettle, setOpenSettle] = useState(false);
   const [initialTask, setInitialTask] = useState<string | undefined>(undefined);
+  const { remoteActive } = useActiveSession();
 
   // void to suppress unused-when-no-session warning
   void moveKanbanCard;
@@ -52,9 +59,16 @@ export default function HomePage() {
           // Tear down the server-side push chain so no further
           // boundary notifications fire for the session we just ended.
           void cancelPushChain().catch(() => {});
+          void clearActiveSession().catch(() => {});
         }}
       />
     );
+  }
+
+  // Another device is mid-pomodoro. Render a read-only mirror and
+  // suppress the start affordance so we can't double-fire.
+  if (remoteActive) {
+    return <RemoteActiveView marker={remoteActive} />;
   }
 
   // Settle banner shows when today's settlement hasn't been done yet
@@ -155,6 +169,18 @@ export default function HomePage() {
               sessionId: String(fresh.phaseStartedAt),
               boundaryAt: fresh.phaseStartedAt + POMO_MS,
               kind: "running-end",
+              count: fresh.count,
+            }).catch(() => {});
+            // Cross-device awareness — write the marker so any other
+            // signed-in device shows a read-only mirror and disables
+            // its start button.
+            void setActiveSession({
+              task: fresh.task,
+              tag: fresh.tag,
+              type: fresh.type,
+              startedAt: fresh.startedAt,
+              phaseStartedAt: fresh.phaseStartedAt,
+              mode: fresh.mode,
               count: fresh.count,
             }).catch(() => {});
           }

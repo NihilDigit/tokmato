@@ -20,6 +20,7 @@ import { TomatoIcon } from "@/components/animations/TomatoIcon";
 import { NotesSheet } from "@/components/sheets/NotesSheet";
 import { useStore } from "@/lib/store";
 import { startPushChain } from "@/app/actions/push";
+import { setActiveSession } from "@/app/actions/active-session";
 import { cn } from "@/lib/utils";
 import type { PomodoroSession, KanbanColumnId } from "@/lib/types";
 
@@ -225,6 +226,19 @@ export function RunningView({ session, onEnd }: RunningViewProps) {
                 sessionId: String(fresh.phaseStartedAt),
                 boundaryAt: fresh.phaseStartedAt + POMO_MS,
                 kind: "running-end",
+                count: fresh.count,
+              }).catch(() => {});
+              // Refresh the cross-device marker — manual skip changes
+              // both phaseStartedAt and count, so the other device
+              // would otherwise show stale numbers until the next
+              // poll-tick (or until /api/push/fire's natural advance).
+              void setActiveSession({
+                task: fresh.task,
+                tag: fresh.tag,
+                type: fresh.type,
+                startedAt: fresh.startedAt,
+                phaseStartedAt: fresh.phaseStartedAt,
+                mode: fresh.mode,
                 count: fresh.count,
               }).catch(() => {});
             }

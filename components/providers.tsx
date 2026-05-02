@@ -1,10 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { SessionProvider, useSession } from "next-auth/react";
 import { ThemeProvider } from "@/components/theme-provider";
 import { EntertainmentRunningView } from "@/components/play/EntertainmentRunningView";
-import { useStore } from "@/lib/store";
+import { selectSnapshot, useStore } from "@/lib/store";
+import { saveToCloud, loadFromCloud } from "@/app/actions/sync";
+
+const AUTOSAVE_DEBOUNCE_MS = 2_000;
 
 export function Providers({ children }: { children: React.ReactNode }) {
   return (
@@ -45,6 +48,78 @@ function ProviderInner({ children }: { children: React.ReactNode }) {
     useStore.getState().grantWelcomeBonus(user.id);
   }, [session?.user, status, storeReady, welcomeGrantedCount]);
 
+  // ─── Auto-sync: app-open LWW load (once per auth session) ──────────────
+  // Only overwrite local when the cloud snapshot is strictly newer than
+  // what this device last in-sync'd against. `lastSavedAt = 0` (default
+  // for a brand-new device) means "accept whatever cloud has".
+  const autoLoadRanRef = useRef(false);
+  useEffect(() => {
+    if (!storeReady) return;
+    if (status !== "authenticated") return;
+    if (autoLoadRanRef.current) return;
+    autoLoadRanRef.current = true;
+    void (async () => {
+      try {
+        const remote = await loadFromCloud();
+        if (!remote) return;
+        const local = useStore.getState();
+        if (remote.savedAt > local.lastSavedAt) {
+          useStore
+            .getState()
+            .applyCloudSnapshot(
+              remote.snapshot as Partial<typeof local>,
+              remote.savedAt,
+            );
+        } else {
+          // Already in sync — record it so subsequent saves don't think
+          // we're behind cloud.
+          useStore.getState().markSynced(remote.savedAt);
+        }
+      } catch {
+        // Network/auth flap — leave local untouched. The user can hit
+        // "立即拉取" in Settings to retry.
+      }
+    })();
+  }, [storeReady, status]);
+
+  // ─── Auto-sync: debounced save on token-balance changes ────────────────
+  // Subscribe at module level (not via the React hook) so we don't
+  // re-create the listener on every render. The listener fires on
+  // every store mutation but we filter to balance-affecting fields
+  // before kicking the debounce timer.
+  useEffect(() => {
+    if (!storeReady) return;
+    if (status !== "authenticated") return;
+
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let lastSig = balanceSignature(useStore.getState());
+
+    const flush = async () => {
+      timer = null;
+      try {
+        const snap = selectSnapshot(useStore.getState());
+        const res = await saveToCloud(snap);
+        useStore.getState().markSynced(res.savedAt);
+      } catch {
+        // Ignore — autosave is best-effort. The Settings page surfaces
+        // explicit save failures; here we'd just fire-and-forget.
+      }
+    };
+
+    const unsub = useStore.subscribe((state) => {
+      const sig = balanceSignature(state);
+      if (sig === lastSig) return;
+      lastSig = sig;
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => void flush(), AUTOSAVE_DEBOUNCE_MS);
+    });
+
+    return () => {
+      unsub();
+      if (timer) clearTimeout(timer);
+    };
+  }, [storeReady, status]);
+
   // Read play session at the root so the timer overlay shows on any tab.
   const playSession = useStore((s) => s.playSession);
   const endPlay = useStore((s) => s.endPlay);
@@ -60,4 +135,30 @@ function ProviderInner({ children }: { children: React.ReactNode }) {
       )}
     </ThemeProvider>
   );
+}
+
+/** Signature of the fields that should trigger an autosave. Stringified
+ *  so cheap equality compares two consecutive emissions; if balances or
+ *  collections that meaningfully record progress change, we save. */
+function balanceSignature(s: ReturnType<typeof useStore.getState>): string {
+  return [
+    s.ftoken,
+    s.htoken,
+    s.timePool,
+    s.lastSettledDate ?? "",
+    s.todayPomos,
+    s.todayMathPomos,
+    s.tokenHistory.length,
+    s.pomodoroHistory.length,
+    s.wishlist.length,
+    s.achievements.length,
+    s.foodPresets.length,
+    // Kanban changes don't gate on balance but the user expects them to
+    // sync — fold a stable kanban shape into the signature.
+    s.kanban.inbox.length,
+    s.kanban.Q1.length,
+    s.kanban.Q2.length,
+    s.kanban.Q3.length,
+    s.kanban.Q4.length,
+  ].join("|");
 }

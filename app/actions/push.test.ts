@@ -110,5 +110,41 @@ describeIf("push server actions (real Redis + QStash)", async () => {
       const after = await redis!.get(`tokmato:user:${TEST_USER_ID}:push:pending`);
       expect(after).toBeNull();
     }, 15_000);
+
+    it("startPushChain rotates pending.sessionId when called twice — old chain is invalidated", async () => {
+      await savePushSubscription({
+        endpoint: "https://updates.push.services.mozilla.com/wpush/v1/rotate",
+        keys: { p256dh: "BX-rotate", auth: "rotate-auth" },
+      });
+
+      // First chain — simulates startSession.
+      await startPushChain({
+        sessionId: "session-A",
+        boundaryAt: Date.now() + 120_000,
+        kind: "running-end",
+        count: 1,
+      });
+      const first = await redis!.get<{ messageId: string; sessionId: string }>(
+        `tokmato:user:${TEST_USER_ID}:push:pending`
+      );
+      expect(first?.sessionId).toBe("session-A");
+
+      // Second chain — simulates manual buffer skip rotating phaseStartedAt.
+      await startPushChain({
+        sessionId: "session-B",
+        boundaryAt: Date.now() + 120_000,
+        kind: "running-end",
+        count: 2,
+      });
+      const second = await redis!.get<{ messageId: string; sessionId: string }>(
+        `tokmato:user:${TEST_USER_ID}:push:pending`
+      );
+      expect(second?.sessionId).toBe("session-B");
+      // Different message — the old chain's pending pointer was overwritten,
+      // so the in-flight callback (if any) sees a sessionId mismatch and exits.
+      expect(second?.messageId).not.toBe(first?.messageId);
+
+      await cancelPushChain();
+    }, 20_000);
   }
 });

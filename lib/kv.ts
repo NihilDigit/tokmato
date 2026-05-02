@@ -41,4 +41,7 @@ export const kvKey = {
   pushSubscription: (userId: string) => `tokmato:user:${userId}:push:sub`,
   /** Currently-pending QStash messageId for the next phase boundary. */
   pushPending: (userId: string) => `tokmato:user:${userId}:push:pending`,
+  /** Cross-device "another device is running a pomodoro" read-only marker.
+   *  Lives with a TTL — auto-clears if the writing device crashes mid-run. */
+  activeSession: (userId: string) => `tokmato:user:${userId}:active`,
 } as const;

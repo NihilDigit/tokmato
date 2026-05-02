@@ -650,6 +650,67 @@ describe("play session lifecycle", () => {
 });
 
 // ===========================================================================
+// auto-sync (lastSavedAt + markSynced + applyCloudSnapshot)
+// ===========================================================================
+describe("auto-sync helpers", () => {
+  it("starter state has lastSavedAt = 0 ('never synced')", () => {
+    expect(s().lastSavedAt).toBe(0);
+  });
+
+  it("markSynced advances lastSavedAt monotonically — older savedAt is ignored", () => {
+    s().markSynced(1000);
+    expect(s().lastSavedAt).toBe(1000);
+    s().markSynced(500); // older — must not regress
+    expect(s().lastSavedAt).toBe(1000);
+    s().markSynced(2000);
+    expect(s().lastSavedAt).toBe(2000);
+  });
+
+  it("applyCloudSnapshot replaces local state and stamps lastSavedAt with the cloud savedAt", () => {
+    s().settle({ fGained: 9, hGained: 9 });
+    s().addWish({ name: "本地", price: 10, pay: "F", why: "local" });
+    expect(s().wishlist.length).toBe(1);
+
+    s().applyCloudSnapshot(
+      {
+        ftoken: 42,
+        wishlist: [
+          {
+            id: "w-cloud",
+            name: "云端",
+            price: 1,
+            pay: "F",
+            why: "cloud",
+            progress: 0,
+          },
+        ],
+      },
+      99_999,
+    );
+    expect(s().ftoken).toBe(42);
+    expect(s().htoken).toBe(0); // missing in cloud snapshot → defaults take over
+    expect(s().wishlist).toEqual([
+      {
+        id: "w-cloud",
+        name: "云端",
+        price: 1,
+        pay: "F",
+        why: "cloud",
+        progress: 0,
+      },
+    ]);
+    expect(s().lastSavedAt).toBe(99_999);
+  });
+
+  it("reset returns lastSavedAt to 0", () => {
+    s().markSynced(12345);
+    expect(s().lastSavedAt).toBe(12345);
+    s().reset();
+    expect(s().lastSavedAt).toBe(0);
+  });
+});
+
+// ===========================================================================
 // reset
 // ===========================================================================
 describe("reset", () => {

@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import { Providers } from "@/components/providers";
 import Header from "@/components/layout/Header";
 import { MobileTabBar } from "@/components/layout/MobileTabBar";
+import { RemoteActiveBanner } from "@/components/layout/RemoteActiveBanner";
 
 const instrumentSerif = Instrument_Serif({
   variable: "--font-instrument-serif",
@@ -67,6 +68,7 @@ export default function RootLayout({
       <body className="min-h-screen bg-paper text-ink">
         <Providers>
           <div className="page-shell">
+            <RemoteActiveBanner />
             <Header />
             {children}
           </div>

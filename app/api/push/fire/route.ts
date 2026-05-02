@@ -101,6 +101,8 @@ export async function POST(request: Request) {
   if (!result.ok && result.reason === "EXPIRED") {
     await redis.del(kvKey.pushSubscription(userId));
     await redis.del(kvKey.pushPending(userId));
+    // Marker is still valid — the user might re-subscribe and the
+    // session is genuinely live. We let TTL clear it naturally.
     return NextResponse.json({ ok: true, dropped: "expired" });
   }
   // Other errors: log but proceed to schedule next link — a transient
@@ -108,6 +110,12 @@ export async function POST(request: Request) {
   if (!result.ok && process.env.NODE_ENV !== "production") {
     console.warn("[push/fire] delivery failed", result);
   }
+
+  // Advance the cross-device active marker so a closed-tab originator
+  // still keeps the marker live and accurate. The stale-session check
+  // above has already gated this branch, so we only ever update the
+  // marker for the canonical chain.
+  await advanceActiveMarker(redis, userId);
 
   // Schedule the next phase boundary so the chain continues even
   // while the browser is fully closed.
@@ -139,4 +147,39 @@ export async function POST(request: Request) {
   }
 
   return NextResponse.json({ ok: true });
+}
+
+const ACTIVE_TTL_SECONDS = 30 * 60;
+
+type ActiveMarker = {
+  task: string;
+  tag: string;
+  type: string;
+  startedAt: number;
+  phaseStartedAt: number;
+  mode: "running" | "buffer";
+  count: number;
+  updatedAt: number;
+};
+
+/** Read the marker, advance one phase, write it back. The advance
+ *  rules mirror `advancePomodoroPhase` in the client store: natural
+ *  boundary bumps `phaseStartedAt` by the elapsed phase duration,
+ *  flips mode, and increments count when going buffer→running.
+ *  No-op if the marker doesn't exist (e.g. the user already ended). */
+async function advanceActiveMarker(
+  redis: ReturnType<typeof requireRedis>,
+  userId: string
+): Promise<void> {
+  const marker = await redis.get<ActiveMarker>(kvKey.activeSession(userId));
+  if (!marker) return;
+  const isRunning = marker.mode === "running";
+  const next: ActiveMarker = {
+    ...marker,
+    mode: isRunning ? "buffer" : "running",
+    phaseStartedAt: marker.phaseStartedAt + (isRunning ? POMO_MS : BUFFER_MS),
+    count: isRunning ? marker.count : marker.count + 1,
+    updatedAt: Date.now(),
+  };
+  await redis.set(kvKey.activeSession(userId), next, { ex: ACTIVE_TTL_SECONDS });
 }

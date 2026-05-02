@@ -36,6 +36,12 @@ jobs:
         run: bunx vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
 
       - name: Build with Vercel
+        env:
+          # Inlined into the bundle by Next.js (NEXT_PUBLIC_*). Tag name
+          # comes from the release event or the v* push that triggered
+          # this workflow — keeps the in-app version label in lockstep
+          # with the deploy.
+          NEXT_PUBLIC_APP_VERSION: ${{ github.event.release.tag_name || github.ref_name }}
         run: bunx vercel build --prod --token="$VERCEL_TOKEN"
 
       - name: Deploy prebuilt output

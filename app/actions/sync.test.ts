@@ -1,51 +1,27 @@
-import { beforeEach, describe, expect, it, mock } from "bun:test";
+/**
+ * Smoke tests for sync server actions — talks to real Upstash Redis.
+ * Auth is the only mocked layer; everything else is the production path.
+ *
+ * Namespaced under `tokmato:user:test-sync:*` so tests don't collide
+ * with real user state. Each test cleans up before and after.
+ */
 
-let session: { user?: { id?: string } } | null = null;
-const redisSet = mock(async () => undefined);
-const redisGet = mock(async () => null as unknown);
-const redisIncr = mock(async () => 1 as number);
-const redisExpire = mock(async () => 1 as number);
-const requireRedis = mock(() => ({
-  set: redisSet,
-  get: redisGet,
-  incr: redisIncr,
-  expire: redisExpire,
-}));
+import { afterAll, beforeEach, describe, expect, it, mock } from "bun:test";
+
+const TEST_USER_ID = "test-sync";
+
+let session: { user?: { id?: string } } | null = { user: { id: TEST_USER_ID } };
 
 mock.module("@/auth", () => ({
   auth: async () => session,
 }));
 
-mock.module("@/lib/kv", () => ({
-  requireRedis,
-  // Bun's module mocks persist for the entire test process, so this
-  // shape must include every key the real `kvKey` exposes — otherwise
-  // sibling test files that import `@/lib/kv` after this one see
-  // missing methods.
-  kvKey: {
-    userState: (userId: string) => `tokmato:user:${userId}:state`,
-    pomodoros: (userId: string, dateKey: string) =>
-      `tokmato:user:${userId}:pomos:${dateKey}`,
-    pushSubscription: (userId: string) => `tokmato:user:${userId}:push:sub`,
-    pushPending: (userId: string) => `tokmato:user:${userId}:push:pending`,
-  },
-  redis: { set: redisSet, get: redisGet, incr: redisIncr, expire: redisExpire },
-}));
+const hasInfra = Boolean(
+  process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL
+);
+const describeIf = hasInfra ? describe : describe.skip;
 
-const { loadFromCloud, saveToCloud } = await import("./sync");
-
-beforeEach(() => {
-  session = null;
-  redisSet.mockClear();
-  redisGet.mockClear();
-  redisIncr.mockClear();
-  redisExpire.mockClear();
-  redisIncr.mockImplementation(async () => 1);
-  requireRedis.mockClear();
-});
-
-/** A minimal valid snapshot matching `persistedSnapshotSchema`. Tests
- *  that mutate one field clone this and override. */
+/** Minimal valid snapshot matching `persistedSnapshotSchema`. */
 function validSnapshot() {
   return {
     ftoken: 1,
@@ -61,6 +37,7 @@ function validSnapshot() {
     todayHGained: 0,
     todayPoolGained: 0,
     welcomeGrantedUserIds: [],
+    lastSavedAt: 0,
     pomodoroHistory: [],
     tokenHistory: [],
     wishlist: [],
@@ -71,77 +48,94 @@ function validSnapshot() {
   };
 }
 
-describe("saveToCloud", () => {
-  it("throws UNAUTHENTICATED before touching Redis when there is no user id", async () => {
+describeIf("sync server actions (real Redis)", async () => {
+  const { saveToCloud, loadFromCloud } = await import("./sync");
+  const { redis } = await import("@/lib/kv");
+
+  const stateKey = `tokmato:user:${TEST_USER_ID}:state`;
+
+  async function cleanup() {
+    if (!redis) return;
+    await redis.del(stateKey);
+    // Drop any rate-limit buckets we may have written. They expire on
+    // their own but leaving 30+ keys per run is loud in the dashboard.
+    const bucket = Math.floor(Date.now() / 1000 / 60);
+    for (let b = bucket - 1; b <= bucket + 1; b++) {
+      await redis.del(`tokmato:user:${TEST_USER_ID}:sync-rl:${b}`);
+    }
+  }
+
+  beforeEach(async () => {
+    session = { user: { id: TEST_USER_ID } };
+    await cleanup();
+  });
+
+  afterAll(async () => {
+    await cleanup();
+  });
+
+  it("UNAUTHENTICATED short-circuits before touching Redis", async () => {
+    session = null;
     await expect(saveToCloud(validSnapshot())).rejects.toThrow("UNAUTHENTICATED");
-    expect(requireRedis).not.toHaveBeenCalled();
-    expect(redisSet).not.toHaveBeenCalled();
-    expect(redisIncr).not.toHaveBeenCalled();
+    await expect(loadFromCloud()).rejects.toThrow("UNAUTHENTICATED");
+    // No state key written
+    const stored = await redis!.get(stateKey);
+    expect(stored).toBeNull();
   });
 
-  it("rejects malformed snapshots without writing to Redis", async () => {
-    session = { user: { id: "u_abc" } };
+  it("INVALID_PAYLOAD on malformed snapshot, no write", async () => {
     await expect(saveToCloud({ ftoken: 1 })).rejects.toThrow("INVALID_PAYLOAD");
-    expect(redisSet).not.toHaveBeenCalled();
-    expect(redisIncr).not.toHaveBeenCalled();
+    expect(await redis!.get(stateKey)).toBeNull();
   });
 
-  it("rejects unknown top-level keys (strict schema)", async () => {
-    session = { user: { id: "u_abc" } };
+  it("INVALID_PAYLOAD rejects unknown top-level keys (strict schema)", async () => {
     const bad = { ...validSnapshot(), evil: "payload" };
     await expect(saveToCloud(bad)).rejects.toThrow("INVALID_PAYLOAD");
-    expect(redisSet).not.toHaveBeenCalled();
+    expect(await redis!.get(stateKey)).toBeNull();
   });
 
-  it("rejects oversized payloads before parsing", async () => {
-    session = { user: { id: "u_abc" } };
+  it("PAYLOAD_TOO_LARGE rejects oversized snapshots before parsing", async () => {
     const bloated = {
       ...validSnapshot(),
-      // Single huge string blows past 256KB.
       recentTasks: [new Array(300_000).fill("x").join("")],
     };
     await expect(saveToCloud(bloated)).rejects.toThrow("PAYLOAD_TOO_LARGE");
-    expect(redisSet).not.toHaveBeenCalled();
+    expect(await redis!.get(stateKey)).toBeNull();
   });
 
-  it("stores the validated snapshot under the authenticated user's state key", async () => {
-    session = { user: { id: "u_abc" } };
+  it("round-trip: saveToCloud writes; loadFromCloud reads back the same shape", async () => {
     const snap = validSnapshot();
+    snap.ftoken = 7;
+    snap.recentTasks = ["刷题", "写笔记"];
+
     const before = Date.now();
+    const saveRes = await saveToCloud(snap);
+    expect(saveRes.ok).toBe(true);
+    expect(saveRes.savedAt).toBeGreaterThanOrEqual(before);
 
-    const result = await saveToCloud(snap);
-
-    expect(result.ok).toBe(true);
-    expect(result.savedAt).toBeGreaterThanOrEqual(before);
-    expect(redisIncr).toHaveBeenCalledTimes(1);
-    expect(redisSet).toHaveBeenCalledTimes(1);
-    const [key, value] = redisSet.mock.calls[0];
-    expect(key).toBe("tokmato:user:u_abc:state");
-    expect(value).toMatchObject({ savedAt: result.savedAt });
-    expect((value as { snapshot: unknown }).snapshot).toMatchObject({ ftoken: 1 });
+    const loaded = await loadFromCloud();
+    expect(loaded).not.toBeNull();
+    expect(loaded!.savedAt).toBe(saveRes.savedAt);
+    expect((loaded!.snapshot as { ftoken: number }).ftoken).toBe(7);
+    expect((loaded!.snapshot as { recentTasks: string[] }).recentTasks).toEqual([
+      "刷题",
+      "写笔记",
+    ]);
   });
 
-  it("rate-limits when the user exceeds the per-window cap", async () => {
-    session = { user: { id: "u_abc" } };
-    redisIncr.mockImplementation(async () => 99); // way over 30
+  it("loadFromCloud returns null when no snapshot has been saved", async () => {
+    const loaded = await loadFromCloud();
+    expect(loaded).toBeNull();
+  });
+
+  it("RATE_LIMITED kicks in after the per-window cap; the offending write is rejected", async () => {
+    // Pre-seed the rate-limit bucket past the 30-cap so the next save trips it.
+    const bucket = Math.floor(Date.now() / 1000 / 60);
+    const rlKey = `tokmato:user:${TEST_USER_ID}:sync-rl:${bucket}`;
+    await redis!.set(rlKey, 100, { ex: 65 });
+
     await expect(saveToCloud(validSnapshot())).rejects.toThrow("RATE_LIMITED");
-    expect(redisSet).not.toHaveBeenCalled();
-  });
-});
-
-describe("loadFromCloud", () => {
-  it("throws UNAUTHENTICATED before touching Redis when there is no user id", async () => {
-    await expect(loadFromCloud()).rejects.toThrow("UNAUTHENTICATED");
-    expect(requireRedis).not.toHaveBeenCalled();
-    expect(redisGet).not.toHaveBeenCalled();
-  });
-
-  it("returns the saved cloud payload for the authenticated user", async () => {
-    session = { user: { id: "u_abc" } };
-    const payload = { snapshot: validSnapshot(), savedAt: 123 };
-    redisGet.mockResolvedValueOnce(payload);
-
-    await expect(loadFromCloud()).resolves.toEqual(payload);
-    expect(redisGet).toHaveBeenCalledWith("tokmato:user:u_abc:state");
+    // No state written despite the rate limit being client-input-independent.
+    expect(await redis!.get(stateKey)).toBeNull();
   });
 });

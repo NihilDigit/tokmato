@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import { useSession, signIn, signOut } from "next-auth/react";
 import { useTheme } from "@/components/theme-provider";
-import { useStore } from "@/lib/store";
+import { selectSnapshot, useStore } from "@/lib/store";
 import { saveToCloud, loadFromCloud } from "@/app/actions/sync";
 import {
   isPushSupported,
@@ -31,6 +31,19 @@ import { cn } from "@/lib/utils";
 import { APP_VERSION } from "@/lib/version";
 
 type SyncStatus = "idle" | "saving" | "loading" | "ok" | "err";
+
+function fmtSyncTime(ms: number): string {
+  if (!ms) return "未同步";
+  const d = new Date(ms);
+  const now = new Date();
+  const sameDay =
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate();
+  return sameDay
+    ? d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    : d.toLocaleString();
+}
 
 type ThemeOption = "auto" | "light" | "dark";
 
@@ -107,12 +120,11 @@ export default function SettingsPage() {
     if (!session?.user) return;
     setSyncStatus("saving");
     try {
-      const raw = localStorage.getItem("tokmato:state");
-      const parsed = raw ? JSON.parse(raw) : { state: {} };
-      const snapshot = parsed.state ?? parsed;
+      const snapshot = selectSnapshot(useStore.getState());
       const res = await saveToCloud(snapshot);
+      useStore.getState().markSynced(res.savedAt);
       setSyncStatus("ok");
-      setSyncMsg(`已上传 · ${new Date(res.savedAt).toLocaleString()}`);
+      setSyncMsg(`已推送 · ${fmtSyncTime(res.savedAt)}`);
     } catch (e) {
       console.error("[settings] saveToCloud failed", e);
       setSyncStatus("err");
@@ -128,7 +140,7 @@ export default function SettingsPage() {
       } else if (msg.includes("RATE_LIMITED")) {
         setSyncMsg("操作过于频繁 · 稍后再试");
       } else {
-        setSyncMsg("上传失败 · 看 console");
+        setSyncMsg("推送失败 · 看 console");
       }
     }
   };
@@ -144,14 +156,14 @@ export default function SettingsPage() {
         setSyncMsg("云端还没有保存过");
         return;
       }
-      // Write directly into the persisted localStorage entry, then reload.
-      localStorage.setItem(
-        "tokmato:state",
-        JSON.stringify({ state: data.snapshot, version: 1 })
-      );
+      useStore
+        .getState()
+        .applyCloudSnapshot(
+          data.snapshot as Partial<ReturnType<typeof useStore.getState>>,
+          data.savedAt,
+        );
       setSyncStatus("ok");
-      setSyncMsg(`已恢复 · ${new Date(data.savedAt).toLocaleString()} · 刷新页面`);
-      setTimeout(() => window.location.reload(), 800);
+      setSyncMsg(`已拉取 · ${fmtSyncTime(data.savedAt)}`);
     } catch (e) {
       console.error("[settings] loadFromCloud failed", e);
       setSyncStatus("err");
@@ -336,37 +348,17 @@ export default function SettingsPage() {
 
       <Hairline />
 
-      {/* ───────────── Cloud sync (only meaningful when signed in) ───── */}
+      {/* ───────────── Cloud sync ───────────── */}
       <Section title="云端">
         {session?.user ? (
-          <div className="flex flex-col gap-3">
-            <GhostRow
-              Icon={CloudUpload}
-              title="上传到云端"
-              sub="把本地状态推到 Vercel KV · 覆盖云端旧记录"
-              onClick={handleSaveCloud}
-              disabled={syncStatus === "saving" || syncStatus === "loading"}
-            />
-            <GhostRow
-              Icon={CloudDownload}
-              title="从云端恢复"
-              sub="拉取云端状态 · 覆盖本地"
-              onClick={handleLoadCloud}
-              disabled={syncStatus === "saving" || syncStatus === "loading"}
-            />
-            {syncMsg && (
-              <p
-                className={cn(
-                  "text-xs",
-                  syncStatus === "err" ? "text-plum" : "text-ink-3"
-                )}
-              >
-                {syncMsg}
-              </p>
-            )}
-          </div>
+          <CloudSync
+            handleSave={handleSaveCloud}
+            handleLoad={handleLoadCloud}
+            syncStatus={syncStatus}
+            syncMsg={syncMsg}
+          />
         ) : (
-          <p className="text-sm text-ink-3">登录 GitHub 后可在此跨设备同步。</p>
+          <p className="text-sm text-ink-3">登录 GitHub 后自动同步开启。</p>
         )}
       </Section>
 
@@ -493,5 +485,76 @@ function GhostRow({
         <span className="ml-auto smallcaps text-ink-mute">soon</span>
       )}
     </button>
+  );
+}
+
+function CloudSync({
+  handleSave,
+  handleLoad,
+  syncStatus,
+  syncMsg,
+}: {
+  handleSave: () => void | Promise<void>;
+  handleLoad: () => void | Promise<void>;
+  syncStatus: SyncStatus;
+  syncMsg: string;
+}) {
+  const lastSavedAt = useStore((s) => s.lastSavedAt);
+  const busy = syncStatus === "saving" || syncStatus === "loading";
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex items-baseline justify-between gap-3 rounded-lg border border-rule bg-paper-2/40 px-4 py-3">
+        <div className="flex flex-col gap-0.5">
+          <span className="smallcaps text-ink-2">自动同步</span>
+          <span className="text-xs text-ink-3">
+            余额变化 2 秒后自动推 · 打开应用时自动拉取较新版本
+          </span>
+        </div>
+        <span className="mono text-xs text-ink-3 whitespace-nowrap">
+          {lastSavedAt ? `上次 ${fmtSyncTime(lastSavedAt)}` : "未同步"}
+        </span>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={busy}
+          className={cn(
+            "inline-flex min-h-10 items-center justify-center gap-2 rounded-full border border-rule bg-paper px-4 text-[13px] text-ink transition",
+            "hover:border-ink/25 hover:bg-paper-2/60",
+            busy && "cursor-not-allowed opacity-60",
+          )}
+        >
+          <CloudUpload size={14} />
+          立即推送
+        </button>
+        <button
+          type="button"
+          onClick={handleLoad}
+          disabled={busy}
+          className={cn(
+            "inline-flex min-h-10 items-center justify-center gap-2 rounded-full border border-rule bg-paper px-4 text-[13px] text-ink transition",
+            "hover:border-ink/25 hover:bg-paper-2/60",
+            busy && "cursor-not-allowed opacity-60",
+          )}
+        >
+          <CloudDownload size={14} />
+          立即拉取
+        </button>
+      </div>
+
+      {syncMsg && (
+        <p
+          className={cn(
+            "text-xs",
+            syncStatus === "err" ? "text-plum" : "text-ink-3",
+          )}
+        >
+          {syncMsg}
+        </p>
+      )}
+    </div>
   );
 }

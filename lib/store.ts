@@ -47,6 +47,7 @@ function createStarterState(): UserState {
     todayHGained: 0,
     todayPoolGained: 0,
     welcomeGrantedUserIds: [],
+    lastSavedAt: 0,
     pomodoroHistory: [],
     tokenHistory: [],
     wishlist: [],
@@ -123,6 +124,13 @@ interface StoreActions {
   settle: (data: { fGained: number; hGained: number }) => void;
   ensureToday: () => void;
   grantWelcomeBonus: (userId: string) => void;
+  /** Mark the store as in-sync with a given cloud savedAt. Called from
+   *  providers.tsx after a successful save or load. */
+  markSynced: (savedAt: number) => void;
+  /** Replace persisted state wholesale with a cloud snapshot, then mark
+   *  the corresponding savedAt. Used by app-open auto-load and by the
+   *  Settings "立即拉取" button. */
+  applyCloudSnapshot: (snapshot: Partial<UserState>, savedAt: number) => void;
 
   // Recharge time pool with F or H
   recharge: (data: { fSpent: number; hSpent: number; minutesGained: number }) => void;
@@ -205,6 +213,12 @@ export const useStore = create<Store>()(
         set((s) => ({
           ...normalizeDay(s),
         })),
+
+      markSynced: (savedAt) =>
+        set((s) => (savedAt > s.lastSavedAt ? { lastSavedAt: savedAt } : s)),
+
+      applyCloudSnapshot: (snapshot, savedAt) =>
+        set(() => ({ ...DEFAULTS, ...snapshot, lastSavedAt: savedAt })),
 
       grantWelcomeBonus: (userId) =>
         set((s) => {
@@ -505,10 +519,13 @@ export const useStore = create<Store>()(
     },
     {
       name: "tokmato:state",
-      version: 3,
+      version: 4,
       // v1 → v2: replace single-slot welcomeGrantUserId with an array so
       // alternating accounts on the same device can't farm welcome bonuses.
       // v2 → v3: add session.phaseStartedAt for clock-based timer.
+      // v3 → v4: add lastSavedAt for auto-sync LWW arbitration. Default 0
+      //          means "never synced", forcing the first app-open load to
+      //          accept whatever cloud has.
       migrate: (persistedState, version) => {
         if (!persistedState || typeof persistedState !== "object") {
           return persistedState as Partial<UserState>;
@@ -528,6 +545,9 @@ export const useStore = create<Store>()(
             sess.phaseStartedAt = Date.now();
           }
         }
+        if (version < 4) {
+          if (typeof state.lastSavedAt !== "number") state.lastSavedAt = 0;
+        }
         return state as Partial<UserState>;
       },
       // Skip auto-hydrate so SSR and the very first client render both
@@ -537,31 +557,42 @@ export const useStore = create<Store>()(
       skipHydration: true,
       storage: createJSONStorage(() => localStorage),
       // Only persist user data — actions are reconstructed from code
-      partialize: (s) => ({
-        ftoken: s.ftoken,
-        htoken: s.htoken,
-        timePool: s.timePool,
-        lastSettledDate: s.lastSettledDate,
-        activeDay: s.activeDay,
-        session: s.session,
-        playSession: s.playSession,
-        todayMathPomos: s.todayMathPomos,
-        todayPomos: s.todayPomos,
-        todayFGained: s.todayFGained,
-        todayHGained: s.todayHGained,
-        todayPoolGained: s.todayPoolGained,
-        welcomeGrantedUserIds: s.welcomeGrantedUserIds,
-        pomodoroHistory: s.pomodoroHistory,
-        tokenHistory: s.tokenHistory,
-        wishlist: s.wishlist,
-        achievements: s.achievements,
-        kanban: s.kanban,
-        recentTasks: s.recentTasks,
-        foodPresets: s.foodPresets,
-      }),
+      partialize: (s) => selectSnapshot(s),
     }
   )
 );
+
+/**
+ * Project the in-memory store down to the persisted/cloud-shipped slice.
+ * Single source of truth for `partialize` (localStorage) AND the
+ * `saveToCloud` payload (KV). When you add a new persistent field, edit
+ * here AND `persistedSnapshotSchema` — the schema is strict.
+ */
+export function selectSnapshot(s: UserState): Partial<UserState> {
+  return {
+    ftoken: s.ftoken,
+    htoken: s.htoken,
+    timePool: s.timePool,
+    lastSettledDate: s.lastSettledDate,
+    activeDay: s.activeDay,
+    session: s.session,
+    playSession: s.playSession,
+    todayMathPomos: s.todayMathPomos,
+    todayPomos: s.todayPomos,
+    todayFGained: s.todayFGained,
+    todayHGained: s.todayHGained,
+    todayPoolGained: s.todayPoolGained,
+    welcomeGrantedUserIds: s.welcomeGrantedUserIds,
+    lastSavedAt: s.lastSavedAt,
+    pomodoroHistory: s.pomodoroHistory,
+    tokenHistory: s.tokenHistory,
+    wishlist: s.wishlist,
+    achievements: s.achievements,
+    kanban: s.kanban,
+    recentTasks: s.recentTasks,
+    foodPresets: s.foodPresets,
+  };
+}
 
 // ─────────────────────────────────────────────────────────────────────────
 // Hydration guard — prevents SSR/client mismatch flash
