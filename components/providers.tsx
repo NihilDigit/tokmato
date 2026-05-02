@@ -19,14 +19,27 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
 function ProviderInner({ children }: { children: React.ReactNode }) {
   const { data: session, status } = useSession();
-  const [storeReady, setStoreReady] = useState(useStore.persist.hasHydrated());
+  // Lazy initializer + null-safe access: during static prerender (e.g.
+  // /_not-found) the zustand persist API may not be attached yet, in
+  // which case we treat "not hydrated" as the initial state. The real
+  // rehydrate runs in the useEffect below.
+  const [storeReady, setStoreReady] = useState<boolean>(
+    () => useStore.persist?.hasHydrated() ?? false,
+  );
   const welcomeGrantedCount = useStore((s) => s.welcomeGrantedUserIds.length);
 
   // Manually rehydrate the persisted store after mount (paired with
   // `skipHydration: true` in lib/store.ts) — keeps SSR HTML consistent
   // with the first client render.
   useEffect(() => {
-    const hydrated = useStore.persist.rehydrate();
+    const persist = useStore.persist;
+    if (!persist) {
+      // No persist API in this environment (shouldn't happen on the
+      // client, but keep the ready flag advancing rather than wedging).
+      setStoreReady(true);
+      return;
+    }
+    const hydrated = persist.rehydrate();
     if (hydrated instanceof Promise) {
       void hydrated.then(() => {
         useStore.getState().ensureToday();

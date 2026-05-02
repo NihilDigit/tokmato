@@ -40,6 +40,9 @@ yarn-error.log*
 # legacy reference (kept locally as design source-of-truth, not in git)
 /legacy
 
+# claude code session state
+/.claude
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

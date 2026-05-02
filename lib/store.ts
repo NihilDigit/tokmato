@@ -594,25 +594,3 @@ export function selectSnapshot(s: UserState): Partial<UserState> {
   };
 }
 
-// ─────────────────────────────────────────────────────────────────────────
-// Hydration guard — prevents SSR/client mismatch flash
-// ─────────────────────────────────────────────────────────────────────────
-import { useEffect, useState } from "react";
-
-export function useHydrated(): boolean {
-  const [hydrated, setHydrated] = useState(false);
-  useEffect(() => setHydrated(true), []);
-  return hydrated;
-}
-
-/** Convenience: returns true when the persisted state has been read back
- *  from localStorage (or there was nothing to read). Use this to gate
- *  rendering of values that would otherwise flash during hydration. */
-export function useStoreHydrated(): boolean {
-  const [ready, setReady] = useState(useStore.persist.hasHydrated());
-  useEffect(() => {
-    const unsub = useStore.persist.onFinishHydration(() => setReady(true));
-    return unsub;
-  }, []);
-  return ready;
-}
