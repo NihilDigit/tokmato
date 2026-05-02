@@ -1,95 +1,193 @@
-# tokmato 🍅
+# CLAUDE.md
 
-番茄 token 应用：把每日的专注产出与健康行为记为可审计的代币，再以代币兑换娱乐时间、零食或愿望清单上的物品。
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-https://tokmato.nihildigit.dev
+> Note: `AGENTS.md` in this repo is a symlink to this file, so AGENTS-aware tools (Cursor, Aider, etc.) read the same content. `README.md` is a separate human-facing document — do not symlink the two.
 
-## 为何不用现有番茄钟
+## ⚠ Next.js 16 — heads-up
 
-现有番茄钟应用普遍以 "25 分钟专注 + 5 分钟休息" 为核心，提供计时与累计统计。这类工具解决的是 "能否完成一次专注"，并不回答另一个更高频的问题：今天累积的产出是否足以支撑今晚的休闲？后一个问题在自我管理偏弱的人群中常以模糊的内疚或反向的过度补偿出现，而这两种状态都会损耗次日。tokmato 把这个判断从隐式情绪转为显式记账。
+This repo uses Next.js 16 with React 19. Several APIs differ from anything in pre-2026 training data: `cookies()` / `headers()` / route `params` are **async**, `middleware.ts` is renamed to `proxy.ts`, PWA manifest goes in `app/manifest.ts` (native), and Turbopack is the default bundler. The bundled docs at `node_modules/next/dist/docs/` are the source of truth — read the relevant guide before writing anything new and heed deprecation notices.
 
-## 代币经济学
+## What this is
 
-系统由两种代币与一个共享的时间池构成：
+**tokmato** — a personal token-economy app for a single user (考研 student, ADHD-leaning). Pomodoro sessions earn FToken (Focus) and HToken (Health); tokens spend into a time pool that funds entertainment / food / wishlist redemption. Deployed to Vercel at https://tokmato.nihildigit.dev. Installable as a PWA, with Web Push notifications that fire even when the browser is closed.
 
-- **FToken**：专注产出（输入型番茄每个 +1，输出型 +0.5）
-- **HToken**：健康行为（早睡、运动、按时吃饭）
+The design constitution lives in `.impeccable.md` — **must-read**. It sets brand voice, palette, info density rules ("杂志调、app 骨"), and what to never do (no marketing副文 / no fake CJK italic / no naked hex).
 
-两者均不可直接消费，需先经 recharge 操作兑换为时间池中的可支配分钟数，再支付娱乐时段、零食或愿望清单上的物品。
-
-设双代币而非单一综合分数，是为规避隐性的代价转移：单一指标会把 "通宵学 8 个番茄" 判为高产，但其实是用健康额度换取了专注分数；分轴记账后，两侧的得失各归其位，便于使用者事后复盘。
-
-时间池作为中间层存在的原因，是 "今日产出 → 今晚奖励" 的直连兑换在决策时刻容易触发合理化偏差。多一步显式的换算动作，把代价与收益的对应关系外显，降低自我说服的可乘之机。
-
-愿望清单是长期通道，把每日盈余沉淀为对未来的具体承诺，例如某台显示器或某款游戏，而非即时消耗。
-
-## 同步模型
-
-云端持久化采用 Upstash Redis 单 key 存放完整状态快照，写入受 zod 校验、256 KB 字节上限与每分钟 30 次的速率限制三层保护。设备端在登录后启用自动同步：Token 余额或集合长度变化时触发 2 秒防抖的 saveToCloud；应用打开时执行一次 loadFromCloud，按 savedAt 时间戳判断云端是否较新，是则全量覆盖本地。
-
-未采用事件溯源（event sourcing）的取舍有两层。其一，应用面向单用户单账号，"两端同时修改同一字段" 的真实概率极低，事件去重与排序的工程复杂度不与之匹配。其二，事件词汇会随每个新增字段线性扩张，对应客户端 reducer 与服务端 apply 逻辑也成倍增长；快照模型把这些归并为单次 partialize + zod 的开销，在单用户场景下显著降低维护成本。
-
-最后写入者优先（LWW）的固有缺陷是 "离线编辑被在线端的旧版本覆盖"。本地端在每次成功保存后写入 lastSavedAt 水位，加载时仅当云端 savedAt 严格大于水位才覆盖，使该缺陷在常见路径上不再触发。
-
-## 推送通知
-
-番茄到点提醒采用服务端调度链路。番茄启动时，客户端经 server action 向 Upstash QStash 推一条延时 25 分钟的回调消息；到时 QStash 调用 `/api/push/fire`，路由由 web-push 库向用户已注册的 PushSubscription 投递 VAPID 签发的通知载荷，再续推下一条延时消息（缓冲结束 1 分钟）。整条链路在服务端自我递推，使用者关闭浏览器或锁屏后仍可如期收到提醒。
-
-未使用浏览器端 setInterval 或 setTimeout 的原因是这些计时器在标签页隐藏或设备休眠时被严格限速，无法保证在番茄结束的瞬间触发；即便授予了 Notification 权限，浏览器闲置态下的可达性也接近不可用。把调度迁至云端后，提醒可达性与浏览器开启状态解耦。
-
-每条消息的 sessionId 由番茄启动瞬间的时间戳派生。使用者手动跳过缓冲时 sessionId 会被重写，旧链路上残留的回调到达 `/api/push/fire` 时与当前 sessionId 失配，按设计静默退出，无须显式取消。
-
-## 跨端只读 awareness
-
-当一台设备正在运行番茄时，其他已登录设备打开应用会自动进入只读镜像状态，禁用 Start 按钮，从根上避免双端同时启动番茄。
-
-实现是一份独立的 30 分钟 TTL 的 KV 标记，由番茄启动、手动跳过缓冲、番茄结束三处客户端写入，并由 `/api/push/fire` 在每次链路推进时同步刷新——即便原始设备已关闭标签页，标记仍会随推送链保持有效。其他设备每 30 秒轮询此标记，读到非自身会话即渲染只读视图。
-
-未采用客户端心跳是因为推送链本身就是天然的心跳源；30 分钟 TTL 在最坏情况下也只让一份失效标记滞留半小时，对单用户场景属于可接受的延迟。
-
-## 已知取舍
-
-- 应用面向单用户单账号设计，不支持多用户共享、团队协作或代理代办场景。
-- 同步策略为最后写入者优先（LWW），并非真正的冲突解决；双端在同一秒内修改同一字段时可能丢失其中一方。单用户场景下该竞态的发生概率极低。
-- 主要目标群体是 ADHD 倾向的考研使用者，部分交互（长按结束、径向手势看板、4am 日界）针对其注意与决策模式优化，对其他使用者可能显得冗余。
-- 数学 tag 阶梯奖（5 / 7 / 9 / 11）的阈值依据作者考研数学复习节奏手工标定，未必适用其他使用场景。
-
-## 功能
-
-- 番茄钟（25 + 1 缓冲），基于 wall-clock 计时，标签页隐藏或设备休眠不漂移
-- Web Push 通知，浏览器关闭后仍可送达
-- 多设备自动同步（GitHub 登录），LWW 仲裁
-- 跨端只读 awareness：一端运行时其他端自动只读镜像
-- 看板：四象限 + 收件箱，移动端径向手势移动
-- 数学 tag 每天 5 / 7 / 9 / 11 个番茄，每挡额外 +1 FToken
-- PWA，iOS 加到主屏幕后可接收推送
-- 暗色模式（墨调深棕，非 OLED 黑）
-
-## 技术栈
-
-Next.js 16 / React 19 / Tailwind 4 / shadcn/ui / Zustand / Auth.js v5 / Upstash Redis & QStash / web-push / Bun。Vercel 部署。
-
-设计规范见 `.impeccable.md`，工程文档见 `CLAUDE.md`。
-
-## 开发
+## Commands
 
 ```bash
-bun install
-bunx vercel env pull .env.local --yes
-bun run dev      # localhost:3000
-bun run test     # 真 Upstash + QStash
-bun run build
+bun run dev          # Start dev server (Turbopack, port 3000)
+bun run build        # Production build + TS typecheck (run before any deploy)
+bun run start        # Serve production build
+bun run test         # Runs `bun test --env-file=.env.local` so smoke tests see real env
+bun test path/to/x   # Single file (will NOT auto-load .env.local — use bun run test)
+
+# Vercel (already linked to nihildigits-projects-daf2fe15/tokmato)
+bunx vercel dev                       # Local with Vercel env injected
+bunx vercel deploy --prod             # Deploy to production
+bunx vercel env pull .env.local --yes # Sync remote env to local
+bunx vercel env add NAME production --value "..." -y  # Push a single var
+
+# Add shadcn primitives
+bunx --bun shadcn@latest add <component>
 ```
 
-## 发布
+Production deploys are triggered by pushing a `v*` tag — `.github/workflows/release-deploy.yml` builds and ships via `vercel deploy --prebuilt --prod`. Don't deploy from a local working tree if the goal is a tagged release; tag and push instead. The workflow injects `NEXT_PUBLIC_APP_VERSION = ${github.ref_name}` into the build env so `lib/version.ts` (and hence the UI's version label) tracks the tag automatically — never hand-edit that file.
 
-```bash
-git tag v1.x
-git push --tags
+## Release authoring
+
+Manual, semantic. Auto-generated commit lists are flow-of-thought; semantic notes are the part of version history future-you actually re-reads.
+
+- **When**: after the v* tag has been pushed AND the `Release Deploy` workflow has gone green AND `tokmato.nihildigit.dev` is verified live.
+- **Skip a tag**: if a tag never deployed (e.g. v1.6 was killed by a prerender bug), don't write a release for it. The follow-up patch (v1.6.1) carries the notes for both.
+- **Structure**: three sections, each on demand.
+  - **主要变化** — user-perceivable functional changes and system-level shifts. Each entry includes the design rationale (why this, not that), at the depth of README's "为何不用现有番茄钟 / 代币经济学" sections.
+  - **修复** — bug fixes, naming the affected path and who would hit it.
+  - **工程** — internal-only changes (test reorgs, CI tweaks, dep bumps).
+- **Style**: same Chinese tech writing discipline as README; the AI-tells blacklist in the global `~/.claude/CLAUDE.md` "文档撰写风格" section applies. Don't write "What's Changed" or commit lists.
+- **Command**:
+  ```bash
+  $EDITOR /tmp/tokmato-release-vX.Y.Z.md   # write the body
+  gh -R NihilDigit/tokmato release create vX.Y.Z \
+    --title "vX.Y.Z" \
+    --notes-file /tmp/tokmato-release-vX.Y.Z.md \
+    --latest --verify-tag
+  ```
+- `--verify-tag` refuses to attach to a non-existent tag; `--latest` matters when a patch supersedes a same-major minor.
+
+## Architecture
+
+### Stack lock-in
+- **Next.js 16** App Router (TS, Turbopack default). `node_modules/next/dist/docs/` is the source of truth for v16 API behavior — `cookies()`/`headers()`/`params` are **async**, `middleware.ts` is renamed to `proxy.ts`, and PWA manifest goes in `app/manifest.ts` (native API). Don't trust pre-v16 patterns from training data.
+- **React 19** — Server Components are the default; only mark `"use client"` when a file uses state, effects, event handlers, or browser APIs.
+- **Tailwind v4** — config-less, theme tokens live in `app/globals.css` `@theme inline {}`. No `tailwind.config.*` file exists.
+- **shadcn/ui** ("base-nova" style) on top of Tailwind v4. CLI alias map: `@/components`, `@/lib`, `@/components/ui`. shadcn's semantic tokens (`--background`, `--foreground`, `--primary`, etc.) are **remapped to tokmato's palette** in `globals.css` so any shadcn component renders in our editorial colors automatically.
+- **Auth.js v5 (next-auth@beta)** with GitHub OAuth — config in `auth.ts`, route handler in `app/api/auth/[...nextauth]/route.ts`. `SessionProvider` wraps the tree in `components/providers.tsx`. JWT sessions only — no DB adapter.
+- **Vercel Marketplace Upstash Redis** for cross-device state sync (env vars `KV_REST_API_URL` / `KV_REST_API_TOKEN`, with `UPSTASH_REDIS_REST_URL/TOKEN` as fallback). Wrapper at `lib/kv.ts`; key namespace via `kvKey.userState(userId)` / `kvKey.pushSubscription(userId)` / `kvKey.pushPending(userId)` / `kvKey.activeSession(userId)`.
+- **Upstash QStash** (US region, `qstash-us-east-1.upstash.io`) for delayed delivery of Web Push notifications. Wrapper at `lib/qstash.ts`. Free tier 500 msg/day is plenty for a single user.
+- **`web-push`** package for VAPID-signed delivery to FCM / Mozilla Push / APNs. Wrapper at `lib/web-push.ts`.
+- **`zod`** for schema validation at trust boundaries (server actions, API routes). Persisted-snapshot schema in `lib/snapshot-schema.ts`.
+
+### Cloud sync — auto-sync via LWW snapshot (v1.6+)
+The store still treats `localStorage` as the in-memory source of truth, but signed-in devices now keep cloud and local in step automatically. `app/actions/sync.ts` exposes `saveToCloud(snapshot)` / `loadFromCloud()`; both gate on `auth()` and throw a typed `SyncError` (codes: `UNAUTHENTICATED` / `INVALID_PAYLOAD` / `PAYLOAD_TOO_LARGE` / `RATE_LIMITED`).
+
+- **Trust boundary**: snapshot is treated as untrusted client input. Validated against `persistedSnapshotSchema` (strict — extra keys rejected at the top level), capped at 256 KB pre-parse, rate-limited at 30 saves/min/user via Redis INCR + EXPIRE. There is **no server-side merge** — LWW arbitration runs entirely on the client. (Schema note: only the outer object is `.strict()`; nested `z.object()` accepts unknown fields.)
+- **`providers.tsx` runs both halves once the store has hydrated and the user is authenticated**:
+  - **Mount-once load**: calls `loadFromCloud()`. If `cloud.savedAt > local.lastSavedAt`, calls `applyCloudSnapshot(snapshot, savedAt)` to overwrite local. Otherwise just `markSynced(savedAt)` so subsequent saves know we're current.
+  - **Token-change debounced save**: subscribes to the store and recomputes a `balanceSignature` (ftoken / htoken / timePool / today\* / history-lengths / kanban-lengths). Any signature change kicks a 2 s debounce; on flush, ships `selectSnapshot(state)` then calls `markSynced(result.savedAt)`. Best-effort — failures are swallowed (Settings is the explicit error surface).
+- **`lastSavedAt`**: local clock value of the most recent successful save OR the cloud `savedAt` we last loaded. The LWW comparator. `0` = "never synced". `markSynced(t)` advances monotonically (older `t` ignored). `applyCloudSnapshot(snap, savedAt)` replaces state wholesale (uses `DEFAULTS` as the base so a missing field doesn't leak the writer's old value into the new local state).
+- **Settings page** is a status row + two **escape hatches**: `立即推送` (force `saveToCloud`) and `立即拉取` (force `loadFromCloud` with confirm). No sync toggle — auto-sync is always on for signed-in users.
+- **Welcome bonus**: `providers.tsx` watches `session.user.id` and, once the store is hydrated, calls `grantWelcomeBonus(userId)` exactly once per user (idempotency lives in `welcomeGrantedUserIds` on the persisted state). Don't re-grant from any other surface.
+- **Adding a new persistent field**: edit (1) `selectSnapshot` in `lib/store.ts` AND (2) `persistedSnapshotSchema` in `lib/snapshot-schema.ts`. The schema is strict at the top level so a forgotten field rejects the whole snapshot. If the default value can't satisfy older records, bump `persist.version` and add a migrate step.
+
+### Web Push notification chain (`app/actions/push.ts` + `app/api/push/fire/route.ts`)
+This is the load-bearing piece for "browser closed → still get notified". The chain is:
+
+```
+client startSession
+  → startPushChain(boundaryAt = now + 25min, kind = "running-end")
+  → QStash holds the message for 25 min
+  → POST /api/push/fire (verified via Upstash-Signature)
+  → sendWebPush(...) → SW.onpush → showNotification("番茄完成")
+  → /api/push/fire schedules the NEXT boundary itself
+  → ...continues across phase boundaries without the client being open
 ```
 
-GitHub Action 在构建阶段注入 `NEXT_PUBLIC_APP_VERSION`，UI 版本号随标签自动更新。
+- **Per-user state in KV**: `push:sub` (the `PushSubscription` JSON) and `push:pending` (`{ messageId, sessionId }` of the in-flight QStash message).
+- **Cancellation via sessionId rotation**: `sessionId = String(session.phaseStartedAt)` at the moment `startPushChain` is called. Manual buffer skip mutates `phaseStartedAt`, so a new chain has a different sessionId. The old chain's in-flight QStash callback arrives, finds `pending.sessionId !== payload.sessionId`, and no-ops. `cancelPushChain` deletes `push:pending` outright; either way old callbacks die quietly.
+- **Natural advance** (running ↔ buffer auto-flip) happens entirely server-side inside `/api/push/fire` — it preserves the same sessionId, so the chain self-perpetuates. The client only schedules the **first** boundary on session start, and re-schedules on a manual buffer skip.
+- **Subscription expiry**: `web-push` returns `{ ok: false, reason: "EXPIRED" }` for 404/410. The route handler drops the `push:sub` key and stops the chain.
+- **VAPID keys** generated once via `bunx web-push generate-vapid-keys --json` and stored in env: `WEB_PUSH_VAPID_PUBLIC_KEY` / `WEB_PUSH_VAPID_PRIVATE_KEY` / `WEB_PUSH_VAPID_SUBJECT`. Public key is also exposed as `NEXT_PUBLIC_WEB_PUSH_VAPID_PUBLIC_KEY` for the client `pushManager.subscribe()` call.
+- **Service worker** at `public/sw.js` — only does push handling and notificationclick → focus existing tab. Do NOT add caching strategies here without thinking about how they interact with the Next.js build pipeline.
+- **Platform caveats**: iOS Safari only honors Web Push when tokmato is installed as a PWA (manifest is in place; user has to "add to home screen"). Chrome desktop needs "Continue running background apps" enabled (default on).
 
-## 许可
+### Cross-device read-only awareness (v1.6, `app/actions/active-session.ts`)
+A single KV key (`tokmato:user:{id}:active`, 30-min TTL) holds a marker describing the in-progress pomodoro string. Other signed-in devices poll it and render a read-only mirror, naturally blocking double-fire.
 
-MIT。欢迎 PR；本项目由个人维护，涉及行为改动的 PR 请先在 Issue 中提 RFC 对齐方向。
+- **Writers**: `startSession` and the manual buffer-skip `onContinue` (both in `/home`-side code) write the marker; `endSession`'s `onEnd` clears it. The `/api/push/fire` route also advances the marker on every chain link via `advanceActiveMarker` (read, bump phase, write back), so the originator's tab being closed doesn't stale the marker — the canonical chain keeps it live.
+- **Reader**: `useActiveSession` (`lib/use-active-session.ts`) polls every 30 s while foreground + on every `visibilitychange("visible")`. "Self vs other" compares `marker.startedAt === local.session?.startedAt`; only a foreign session bubbles up as `remoteActive`.
+- **UI**: on `/home`, `RemoteActiveView` (`components/home/RemoteActiveView.tsx`) replaces the start affordance entirely with a muted timer mirror. On every other route, `RemoteActiveBanner` (`components/layout/RemoteActiveBanner.tsx`) renders a sticky pill at the top of `.page-shell` so the user knows another device is mid-run regardless of which tab they're on. Both render nothing when local is the originator.
+- **No heartbeat**: the push chain is the heartbeat. The 30-min TTL means a crashed writer's marker auto-clears within half an hour, which is the worst-case latency for the "phantom lock" failure mode in single-user use.
+
+### Design tokens (single source of truth: `app/globals.css`)
+Tokens live as CSS custom properties on `:root` and are exposed to Tailwind via `@theme inline`. The `[data-theme="dark"]` and `.dark` selectors swap the values for warm-dark mode (墨调/深棕, **not** OLED black).
+
+- **Color**: `--paper / --paper-2 / --paper-3 / --ink / --ink-2 / --ink-3 / --ink-mute / --rule / --tomato (FToken / brand) / --sage (HToken) / --teal (time pool) / --gold (math bonus) / --plum (alerts/熬夜)`. Use as Tailwind utilities: `bg-paper text-ink border-rule text-tomato` etc.
+- **Type**: `font-serif` (CJKKai → Instrument Serif fallback via unicode-range), `font-kaiti` (CJK only, used when "italic" is wanted on Chinese), `font-sans` (Inter Tight), `font-mono` (JetBrains Mono).
+- **Fluid sizes**: `text-display / text-h1 / text-h2 / text-h3 / text-stat / text-balance-num` are all `clamp()`-based — never hardcode px sizes for hero text.
+- **Layout**: `--page-pad-x/y`, `--mobile-nav-h`, `--safe-t/r/b/l` (env(safe-area-inset-*)). Every page wraps content in `.page-shell` (handles max-width, fluid padding, safe area, and bottom-nav offset on mobile).
+
+### Tailwind-merge pitfall
+`cn()` uses `tailwind-merge`, which **dedupes `text-stat` (font-size token) and `text-tomato` (color token) as conflicting `text-*` utilities** and drops one. When you need both color and size, build the className with a template literal instead of `cn`:
+```ts
+const valueClass = `serif text-stat leading-none${color ? " " + color : ""}`;
+```
+Example reference: `app/journey/page.tsx` `BalanceCell`.
+
+### State (Zustand + persist + skipHydration)
+`lib/store.ts` is the single in-memory state hub. Schema is `UserState` from `lib/types.ts`.
+
+**Critical**: persist uses `skipHydration: true`. SSR and the very first client render must both see `DEFAULTS`. `components/providers.tsx` runs `useStore.persist.rehydrate()` in a `useEffect` after mount — **do not** read or branch UI on persisted-state until after that effect runs. If a value flips between SSR and client (e.g. `lastSettledDate` → today vs null), you'll get a hydration mismatch.
+
+**Null-safe persist access**: any code that runs during static prerender (initial `useState(...)` values, server components reading client modules) must guard `useStore.persist?.hasHydrated()` with optional chaining and a `?? false` fallback. The persist API namespace is not always attached at prerender time, and a bare `useStore.persist.hasHydrated()` killed the v1.6 build for `/_not-found`.
+
+`todayKey()` in `lib/store.ts` returns the current "tokmato day" — UTC+8 with a **4am cutoff** (so a late-night user can still settle the day they just finished). Use this for any "is today" comparison, never `new Date().toLocaleDateString()`.
+
+The persist version is at `4` — bumping it requires a `migrate` function that handles every prior shape. v1→v2 was `welcomeGrantUserId` → `welcomeGrantedUserIds[]`; v2→v3 added `session.phaseStartedAt`; v3→v4 added `lastSavedAt` for auto-sync LWW arbitration (defaults to `0` = "never synced").
+
+`selectSnapshot(state)` (exported from `lib/store.ts`) is the single projection used by both `partialize` (localStorage) and `saveToCloud` (KV). Don't roll your own subset — every persisted-shape reader should go through this.
+
+### Page shells & sheet system
+- **Routes**: `/home`, `/journey`, `/redeem`, `/kanban`, `/settings`. `/` redirects to `/home`. Layout renders `<RemoteActiveBanner>` (sticky pill, hidden on `/home`) + `<Header>` (desktop top nav, hidden on mobile via `.desktop-only-nav`) + `<MobileTabBar>` (bottom nav, `md:hidden`).
+- **Sheets** all use `<ResponsiveSheet>` (`components/ui/responsive-sheet.tsx`) which auto-branches: bottom-sheet on mobile (Radix Sheet), centered modal on desktop (Radix Dialog). When open, it sets `body[data-sheet-open]`, which `globals.css` uses to hide the mobile tab bar so it doesn't peek through. Counter pattern supports nested sheets.
+- 9 sheet content components live in `components/sheets/` (Start / Pool / Play / Food / Settle / Notes / AddKanban / AddWish / WishRedeem). All take props + `onConfirm` and call store actions; they don't reach into the store themselves. **Never use `window.prompt`/`window.confirm` for in-app input** — wrap a sheet instead. (See `AddKanbanSheet` for the reference pattern.)
+
+### Pomodoro & entertainment session lifecycle (clock-based)
+**Display time is computed every render from `Date.now() - phaseStartedAt`.** Never decrement a counter via `setInterval` — that drifts under tab throttling and resets on remount. The 250 ms tick only triggers a re-render; the actual time math reads wall-clock.
+
+- **`PomodoroSession`** carries `startedAt` (immutable session start), `phaseStartedAt` (current phase start, mutates on each transition), `mode` (`"running" | "buffer"`), and `count` (1-based). All persisted in localStorage so a reload preserves position.
+- **`advancePomodoroPhase({ manual?, now? })`** in the store handles transitions:
+  - Natural: only no-ops until `now >= phaseStartedAt + duration`. Bumps `phaseStartedAt` by `duration`. After running → buffer keeps count; after buffer → running increments count.
+  - `manual: true` (user clicks "继续下一个" during buffer): sets `phaseStartedAt = now` so the next pomodoro starts from the click moment, not from when buffer would have ended.
+  - Crossed multiple boundaries during a sleep? The auto-advance useEffect calls it repeatedly each tick until caught up.
+- **`RunningView`** (`components/home/RunningView.tsx`) uses `Date.now()` ticks + `visibilitychange`/`focus`/`pageshow` resync. On boundary cross it (a) fires a foreground `Notification` if permission granted, and (b) calls `advancePomodoroPhase`. Long-press end is a **deliberate cut-off, no confetti** (per design feedback). Triggers `NotesSheet` review if there are notes, then `endSession`.
+- **`PlaySession`** (`playSession` in store): started by `PlaySheet` → `EntertainmentRunningView` (`components/play/EntertainmentRunningView.tsx`) renders as a **full-screen overlay mounted in `<Providers>`** so it covers any tab. Time-pool minutes are deducted upfront on `startPlay`; long-press end refunds remaining minutes via `endPlay({ refundMinutes })`. Same wall-clock-based timer pattern as `RunningView`.
+- **Push chain integration**: `startSession` and the manual buffer-skip `onContinue` both call `startPushChain` to (re)schedule the next server-side boundary notification, AND `setActiveSession(...)` to (re)write the cross-device awareness marker. `endSession` calls `cancelPushChain` and `clearActiveSession`. See the Web Push and Cross-device awareness sections above.
+
+### Kanban (the one tab with deep mobile interaction)
+- **Desktop** (`md:flex`): inbox row + 2×2 quadrant grid, HTML5 drag-and-drop, drop indicator highlights the entire target column.
+- **Mobile** (`md:hidden`): segmented tab strip across top (5 columns), single column body. Cards are moved via a **gestural radial menu**: long-press 360 ms triggers an SVG overlay anchored at the touch point with a connecting line that follows the finger; pulling past a 28 px dead-zone snaps to one of 5 destination chips (↑Q1 / →Q2 / ↓Q3 / ←Q4 / center=Inbox). Implemented inline at the bottom of `app/kanban/page.tsx` (`RadialMoveMenu`).
+- "新任务" opens `AddKanbanSheet` (replaces a legacy `window.prompt`).
+
+## Project conventions to enforce
+
+- **No raw hex / oklch / rgba in component code** — always go through a CSS variable in `globals.css`. Even one-off colors (gradients, SVG fills) get a token.
+- **No marketing副文** (per `.impeccable.md` principle 1 "诚实大于优雅"). Every line of UI text must be either functional info or named action. Examples of what gets cut: dot-separated AI-style taglines, explainer subtitles under section titles, redundant bilingual labels (e.g. "Settings / 设置" together — pick one).
+- **Daily hero size is `text-h2` max**. `text-display` (clamp 48-88) is reserved for once-a-year emotional peaks (year-end review, settlement celebration). Home / Redeem hero never use it.
+- **Above-the-fold density**: each route's first viewport must surface ≥3 independent functional chunks (card / strip / row). No giant centered headline that owns the whole screen.
+- **CJK italic = 楷体, never browser-faked oblique**. `font-synthesis: none` is set globally; the `font-serif` stack puts CJKKai (with `unicode-range: U+3000-9FFF`) in front of Instrument Serif so Latin text gets real italic and Chinese gets 楷体.
+- **Mobile tab labels match desktop** (currently English: Home / Journey / Redeem / Kanban / Settings).
+
+## Testing notes
+
+Layout (`bun test` discovery):
+- `lib/store.test.ts` — pure unit tests of the Zustand store (in-memory localStorage stub).
+- `lib/utils.test.ts` — single regression test pinning the tailwind-merge pitfall above.
+- `lib/snapshot-schema.test.ts` — pure unit tests of the persist/cloud-sync schema (boundaries, strictness, lastSavedAt presence).
+- `lib/qstash.test.ts` — smoke against real Upstash QStash (publish + immediate cancel).
+- `lib/web-push.test.ts` — smoke against real VAPID delivery to a bogus endpoint, plus the `DISABLED` branch when env is wiped.
+- `app/actions/sync.test.ts` — smoke against real Upstash Redis; mocks **only** `@/auth`. Namespace `tokmato:user:test-sync:*`.
+- `app/actions/push.test.ts` — smoke against real Redis + QStash. Namespace `tokmato:user:test-smoke:*`. Includes a sessionId-rotation case for `startPushChain`.
+- `app/actions/active-session.test.ts` — smoke against real Redis. Namespace `tokmato:user:test-active:*`.
+
+Conventions:
+- **`bun run test`** loads `.env.local` (via `--env-file`) so smoke tests hit real Upstash. Plain `bun test path/...` does NOT.
+- **`describeIf(hasEnv ? describe : describe.skip)` pattern** — smoke tests gracefully skip when env isn't present (e.g. CI without secrets). Don't write smoke tests that throw on missing env.
+- **Module mocks pollute across files**. `bun:test`'s `mock.module(...)` is process-global; every test file that mocks `@/auth` or `@/lib/kv` must keep its mock shape in sync with the real module's exports, otherwise sibling files load the partial mock and crash.
+- **Smoke namespace cleanup**: every smoke test that writes to KV must `await cleanup()` in `beforeEach` AND `afterAll` to keep the dashboard tidy.
+- **Cost**: a CI run executes a few Upstash commands and one or two QStash publish/cancel pairs — well under the free tier ceiling.
+
+## Multi-agent workflow notes
+
+This project was built largely by spawning parallel `general-purpose` Agent subagents — one per page during the page pass, one per sheet during the sheet pass, etc. When an agent writes a sheet or page, give it: the file path to mirror, a pointer to `.impeccable.md`, and the design vocabulary range to stay inside (text-h2 max, smallcaps for kickers, no marketing副文). Agents that don't read `.impeccable.md` will reintroduce naked hex and AI-flavored taglines.
