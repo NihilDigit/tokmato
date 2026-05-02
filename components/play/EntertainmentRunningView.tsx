@@ -40,36 +40,44 @@ export function EntertainmentRunningView({
   session,
   onEnd,
 }: EntertainmentRunningViewProps) {
-  const totalSec = session.totalMinutes * 60;
+  const totalMs = session.totalMinutes * 60 * 1000;
   const costMinutes = session.costMinutes ?? session.totalMinutes;
   const refundScale = session.totalMinutes > 0 ? costMinutes / session.totalMinutes : 1;
-  const elapsedAtMount = Math.floor((Date.now() - session.startedAt) / 1000);
-  const [secondsLeft, setSecondsLeft] = useState(() =>
-    Math.max(0, totalSec - elapsedAtMount)
+  const [now, setNow] = useState(() => Date.now());
+  const secondsLeft = Math.max(
+    0,
+    Math.ceil((totalMs - (now - session.startedAt)) / 1000)
   );
   const [holding, setHolding] = useState(0);
   const holdTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Countdown
+  // Wall-clock tick + visibility resync — keeps the displayed countdown
+  // accurate even after a backgrounded tab or short close.
   useEffect(() => {
-    if (secondsLeft <= 0) {
-      onEnd({ refundMinutes: 0 });
-      return;
-    }
-    const tick = setInterval(() => {
-      setSecondsLeft((s) => {
-        if (s <= 1) {
-          clearInterval(tick);
-          onEnd({ refundMinutes: 0 });
-          return 0;
-        }
-        return s - 1;
-      });
-    }, 1000);
-    return () => clearInterval(tick);
-    // onEnd is intentionally omitted; we only react to count change here
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const sync = () => setNow(Date.now());
+    sync();
+    const id = setInterval(sync, 250);
+    const onVisible = () => sync();
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+    window.addEventListener("pageshow", onVisible);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
+      window.removeEventListener("pageshow", onVisible);
+    };
   }, []);
+
+  // Auto-end at boundary
+  const endedRef = useRef(false);
+  useEffect(() => {
+    if (endedRef.current) return;
+    if (secondsLeft <= 0) {
+      endedRef.current = true;
+      onEnd({ refundMinutes: 0 });
+    }
+  }, [secondsLeft, onEnd]);
 
   // Long-press end
   const startHold = () => {
@@ -97,6 +105,7 @@ export function EntertainmentRunningView({
   };
   useEffect(() => () => cancelHold(), []);
 
+  const totalSec = totalMs / 1000;
   const progress = totalSec > 0 ? 1 - secondsLeft / totalSec : 1;
 
   return (

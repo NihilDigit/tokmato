@@ -138,6 +138,15 @@ interface StoreActions {
   startSession: (data: { task: string; tag: TagId; type: SessionType }) => void;
   endSession: (data?: { completedCount?: number }) => void;
   addNoteToSession: (note: string) => void;
+  /**
+   * Advance the active session's phase based on wall-clock time.
+   *
+   * - `mode` flips between "running" (25min) and "buffer" (1min)
+   * - On natural advance the next `phaseStartedAt = current + duration`,
+   *   so multiple boundaries crossed during a sleep are caught up.
+   * - On manual buffer skip the next pomodoro starts at `now`.
+   */
+  advancePomodoroPhase: (data?: { manual?: boolean; now?: number }) => void;
 
   // Kanban
   moveKanbanCard: (data: { cardId: string; toCol: KanbanColumnId }) => void;
@@ -273,17 +282,64 @@ export const useStore = create<Store>()(
         })),
 
       startSession: ({ task, tag, type }) => {
+        const now = Date.now();
         const session: PomodoroSession = {
           task,
           tag,
           type,
-          startedAt: Date.now(),
+          startedAt: now,
+          phaseStartedAt: now,
           count: 1,
           mode: "running",
           notes: [],
         };
         set((s) => ({ ...normalizeDay(s), session }));
       },
+
+      advancePomodoroPhase: (data) =>
+        set((s) => {
+          if (!s.session) return s;
+          const now = data?.now ?? Date.now();
+          const manual = data?.manual === true;
+          const POMO_MS = 25 * 60 * 1000;
+          const BUFFER_MS = 60 * 1000;
+          const { mode, phaseStartedAt, count } = s.session;
+          const duration = mode === "running" ? POMO_MS : BUFFER_MS;
+          // Manual skip is only valid during buffer (the user clicked
+          // "继续下一个"). Running mode never skips manually — that path
+          // is "结束这一串" and goes through endSession.
+          if (manual && mode === "buffer") {
+            return {
+              session: {
+                ...s.session,
+                mode: "running",
+                count: count + 1,
+                phaseStartedAt: now,
+              },
+            };
+          }
+          // Natural advance: only when the boundary has actually been
+          // crossed. Caller may invoke this on every tick; we no-op
+          // until the wall-clock has passed `phaseStartedAt + duration`.
+          if (now < phaseStartedAt + duration) return s;
+          if (mode === "running") {
+            return {
+              session: {
+                ...s.session,
+                mode: "buffer",
+                phaseStartedAt: phaseStartedAt + duration,
+              },
+            };
+          }
+          return {
+            session: {
+              ...s.session,
+              mode: "running",
+              count: count + 1,
+              phaseStartedAt: phaseStartedAt + duration,
+            },
+          };
+        }),
 
       endSession: (data) =>
         set((s) => {
@@ -449,9 +505,10 @@ export const useStore = create<Store>()(
     },
     {
       name: "tokmato:state",
-      version: 2,
+      version: 3,
       // v1 → v2: replace single-slot welcomeGrantUserId with an array so
       // alternating accounts on the same device can't farm welcome bonuses.
+      // v2 → v3: add session.phaseStartedAt for clock-based timer.
       migrate: (persistedState, version) => {
         if (!persistedState || typeof persistedState !== "object") {
           return persistedState as Partial<UserState>;
@@ -462,6 +519,14 @@ export const useStore = create<Store>()(
           state.welcomeGrantedUserIds =
             typeof legacy === "string" && legacy ? [legacy] : [];
           delete state.welcomeGrantUserId;
+        }
+        if (version < 3) {
+          const sess = state.session as Record<string, unknown> | null | undefined;
+          if (sess && typeof sess.startedAt === "number" && typeof sess.phaseStartedAt !== "number") {
+            // Best-effort: restart the current phase from now to avoid
+            // an instant jump that would skip multiple boundaries.
+            sess.phaseStartedAt = Date.now();
+          }
         }
         return state as Partial<UserState>;
       },

@@ -3,30 +3,27 @@
 /**
  * RunningView — Home tab's running-pomodoro state.
  *
- * State machine:
- *   running (25 min countdown)
- *     ├── timer reaches 0 → buffer (60s) (auto-continue)
- *     ├── user long-presses "结束" → ends session
- *     │     → confetti animation
- *     │       → NotesSheet (if notes.length > 0)
- *     │         → onEnd(noteAssignments)
- *     │       → onEnd([]) (no notes)
- *     └── user types in "闪过的想法" input + Enter → adds to notes[]
- *   buffer
- *     ├── user clicks "继续" or timer reaches 0 → next pomodoro starts
- *     └── user clicks "结束" → same as long-press end above
+ * Clock-based: countdown is computed every tick from
+ * `Date.now() - session.phaseStartedAt`, never decremented from local
+ * state. So if the tab is throttled or briefly closed and reopened,
+ * the displayed time stays correct and crossed phase boundaries are
+ * caught up by `advancePomodoroPhase()`.
+ *
+ * Notification API: best-effort permission request on first mount of
+ * an active session; fires a desktop notification on each phase
+ * boundary so a backgrounded user is alerted. (Service-worker / Web
+ * Push for fully-closed-tab alerts is out of scope for v1.4.)
  */
 
 import { useEffect, useRef, useState } from "react";
 import { TomatoIcon } from "@/components/animations/TomatoIcon";
 import { NotesSheet } from "@/components/sheets/NotesSheet";
+import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import type { PomodoroSession, KanbanColumnId } from "@/lib/types";
 
-type Mode = "running" | "buffer";
-
-const POMO_SECONDS = 25 * 60;
-const BUFFER_SECONDS = 60;
+const POMO_MS = 25 * 60 * 1000;
+const BUFFER_MS = 60 * 1000;
 const HOLD_MS = 1500;
 
 const TAG_TONE: Record<string, { bg: string; text: string }> = {
@@ -45,10 +42,25 @@ const TAG_LABEL: Record<string, string> = {
   trash: "#trash",
 };
 
-function fmtMmSs(sec: number): string {
+function fmtMmSs(ms: number): string {
+  const sec = Math.max(0, Math.ceil(ms / 1000));
   const m = Math.floor(sec / 60);
-  const s = Math.floor(sec % 60);
+  const s = sec % 60;
   return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+}
+
+function fireNotification(title: string, body: string) {
+  try {
+    if (
+      typeof window !== "undefined" &&
+      "Notification" in window &&
+      Notification.permission === "granted"
+    ) {
+      new Notification(title, { body, icon: "/icon.png", tag: "tokmato-pomodoro" });
+    }
+  } catch {
+    // ignore — Notification can throw on some embedded contexts
+  }
 }
 
 export interface RunningViewProps {
@@ -62,10 +74,13 @@ export interface RunningViewProps {
 }
 
 export function RunningView({ session, onEnd }: RunningViewProps) {
-  const [mode, setMode] = useState<Mode>("running");
-  const [secondsLeft, setSecondsLeft] = useState(POMO_SECONDS);
-  const [bufferLeft, setBufferLeft] = useState(BUFFER_SECONDS);
-  const [count, setCount] = useState(session.count);
+  const advancePhase = useStore((s) => s.advancePomodoroPhase);
+
+  const { mode, count, phaseStartedAt } = session;
+  const phaseDuration = mode === "running" ? POMO_MS : BUFFER_MS;
+
+  // Wall-clock tick — single source of truth for displayed time.
+  const [now, setNow] = useState(() => Date.now());
 
   // Notes typed during this string of pomodoros
   const [notes, setNotes] = useState<string[]>(session.notes ?? []);
@@ -79,40 +94,54 @@ export function RunningView({ session, onEnd }: RunningViewProps) {
   const [showNotesSheet, setShowNotesSheet] = useState(false);
   const [pendingNotes, setPendingNotes] = useState<string[]>([]);
 
-  // ─── Timer effect ───────────────────────────────────────────────────────
+  // Track which boundary we've already notified for, to avoid double-fire
+  // if the auto-advance and tick both observe the same crossing.
+  const lastNotifiedBoundaryRef = useRef<number | null>(null);
+
+  // ─── Notification permission — request once on first mount ─────────────
+  useEffect(() => {
+    if (typeof window === "undefined" || !("Notification" in window)) return;
+    if (Notification.permission === "default") {
+      // Best-effort. Some browsers gate this behind a user gesture; if
+      // it fails silently, we just don't get notifications.
+      Notification.requestPermission().catch(() => {});
+    }
+  }, []);
+
+  // ─── Wall-clock tick + visibility resync ───────────────────────────────
   useEffect(() => {
     if (showNotesSheet) return; // pause during end flow
-    const tick = setInterval(() => {
+    const sync = () => setNow(Date.now());
+    sync();
+    const id = setInterval(sync, 250);
+    const onVisible = () => sync();
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+    window.addEventListener("pageshow", onVisible);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
+      window.removeEventListener("pageshow", onVisible);
+    };
+  }, [showNotesSheet]);
+
+  // ─── Auto-advance + notify when phase boundary crosses ─────────────────
+  useEffect(() => {
+    if (showNotesSheet) return;
+    const elapsed = now - phaseStartedAt;
+    if (elapsed < phaseDuration) return;
+    const boundaryAt = phaseStartedAt + phaseDuration;
+    if (lastNotifiedBoundaryRef.current !== boundaryAt) {
+      lastNotifiedBoundaryRef.current = boundaryAt;
       if (mode === "running") {
-        setSecondsLeft((s) => {
-          if (s <= 1) {
-            setMode("buffer");
-            setBufferLeft(BUFFER_SECONDS);
-            // Notification (best-effort, no permission prompt)
-            try {
-              if ("Notification" in window && Notification.permission === "granted") {
-                new Notification("番茄完成", { body: "进入 1 分钟缓冲" });
-              }
-            } catch {}
-            return POMO_SECONDS;
-          }
-          return s - 1;
-        });
+        fireNotification("番茄完成", "进入 1 分钟缓冲");
       } else {
-        setBufferLeft((s) => {
-          if (s <= 1) {
-            // Auto-continue next pomodoro
-            setMode("running");
-            setCount((c) => c + 1);
-            setSecondsLeft(POMO_SECONDS);
-            return BUFFER_SECONDS;
-          }
-          return s - 1;
-        });
+        fireNotification("缓冲结束", `第 ${count + 1} 个番茄开始`);
       }
-    }, 1000);
-    return () => clearInterval(tick);
-  }, [mode, showNotesSheet]);
+    }
+    advancePhase({ now });
+  }, [now, mode, count, phaseStartedAt, phaseDuration, advancePhase, showNotesSheet]);
 
   // ─── Long-press end flow ────────────────────────────────────────────────
   const startHold = () => {
@@ -169,9 +198,9 @@ export function RunningView({ session, onEnd }: RunningViewProps) {
 
   // ─── Render ─────────────────────────────────────────────────────────────
   const isBuffer = mode === "buffer";
-  const left = isBuffer ? bufferLeft : secondsLeft;
-  const total = isBuffer ? BUFFER_SECONDS : POMO_SECONDS;
-  const progress = 1 - left / total;
+  const elapsed = Math.max(0, now - phaseStartedAt);
+  const remainingMs = Math.max(0, phaseDuration - elapsed);
+  const progress = Math.min(1, elapsed / phaseDuration);
 
   // Active session count display: in running mode we're working on the nth,
   // in buffer mode the nth was just completed.
@@ -182,14 +211,9 @@ export function RunningView({ session, onEnd }: RunningViewProps) {
       {/* Buffer full-screen overlay (replaces the legacy thin top banner) */}
       {isBuffer && (
         <BufferOverlay
-          bufferLeft={bufferLeft}
+          remainingMs={remainingMs}
           completedCount={count}
-          onContinue={() => {
-            setMode("running");
-            setCount((c) => c + 1);
-            setSecondsLeft(POMO_SECONDS);
-            setBufferLeft(BUFFER_SECONDS);
-          }}
+          onContinue={() => advancePhase({ manual: true })}
           onEnd={triggerEnd}
         />
       )}
@@ -203,7 +227,7 @@ export function RunningView({ session, onEnd }: RunningViewProps) {
           </div>
           <div>
             <div className="font-mono text-display leading-none tracking-tight text-ink">
-              {fmtMmSs(left)}
+              {fmtMmSs(remainingMs)}
             </div>
             <div className={cn("smallcaps mt-2", isBuffer ? "text-tomato-deep" : "text-ink-3")}>
               第 {count} 个番茄 · 进行中
@@ -325,12 +349,12 @@ export function RunningView({ session, onEnd }: RunningViewProps) {
 // banner per phase-5 spec: "buffer banner 改全屏柔和过渡 + 中央倒计时")
 // ────────────────────────────────────────────────────────────────────────────
 function BufferOverlay({
-  bufferLeft,
+  remainingMs,
   completedCount,
   onContinue,
   onEnd,
 }: {
-  bufferLeft: number;
+  remainingMs: number;
   completedCount: number;
   onContinue: () => void;
   onEnd: () => void;
@@ -351,7 +375,7 @@ function BufferOverlay({
           第 {completedCount} 个番茄完成 · 缓冲中
         </div>
         <div className="font-mono text-display leading-none tracking-tight text-ink">
-          {fmtMmSs(bufferLeft)}
+          {fmtMmSs(remainingMs)}
         </div>
         <div className="font-kaiti italic max-w-[420px] px-6 text-[16px] leading-relaxed text-ink-2">
           一分钟休息。喝口水, 看看远处, 然后继续下一个 25 分钟。

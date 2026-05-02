@@ -344,6 +344,62 @@ describe("endSession", () => {
 });
 
 // ===========================================================================
+// advancePomodoroPhase
+// ===========================================================================
+describe("advancePomodoroPhase", () => {
+  const POMO_MS = 25 * 60 * 1000;
+  const BUFFER_MS = 60 * 1000;
+
+  it("is a no-op without an active session", () => {
+    s().advancePomodoroPhase({ now: 9_999_999_999 });
+    expect(s().session).toBeNull();
+  });
+
+  it("running → buffer when boundary has been reached", () => {
+    s().startSession({ task: "刷题", tag: "cs", type: "input" });
+    const start = s().session!.phaseStartedAt;
+    // Just before the boundary — no advance yet.
+    s().advancePomodoroPhase({ now: start + POMO_MS - 1 });
+    expect(s().session!.mode).toBe("running");
+
+    s().advancePomodoroPhase({ now: start + POMO_MS });
+    expect(s().session!.mode).toBe("buffer");
+    expect(s().session!.phaseStartedAt).toBe(start + POMO_MS);
+    expect(s().session!.count).toBe(1);
+  });
+
+  it("buffer → running auto-advance bumps count and shifts phaseStartedAt by BUFFER_MS", () => {
+    s().startSession({ task: "刷题", tag: "cs", type: "input" });
+    const start = s().session!.phaseStartedAt;
+    s().advancePomodoroPhase({ now: start + POMO_MS }); // → buffer
+    s().advancePomodoroPhase({ now: start + POMO_MS + BUFFER_MS });
+    expect(s().session!.mode).toBe("running");
+    expect(s().session!.count).toBe(2);
+    expect(s().session!.phaseStartedAt).toBe(start + POMO_MS + BUFFER_MS);
+  });
+
+  it("manual buffer skip resets phaseStartedAt to `now` instead of natural boundary", () => {
+    s().startSession({ task: "刷题", tag: "cs", type: "input" });
+    const start = s().session!.phaseStartedAt;
+    s().advancePomodoroPhase({ now: start + POMO_MS }); // → buffer
+    // User clicks "继续下一个" 30s into buffer — pomodoro should restart from now.
+    const skipAt = start + POMO_MS + 30_000;
+    s().advancePomodoroPhase({ manual: true, now: skipAt });
+    expect(s().session!.mode).toBe("running");
+    expect(s().session!.count).toBe(2);
+    expect(s().session!.phaseStartedAt).toBe(skipAt);
+  });
+
+  it("manual flag is ignored during running mode", () => {
+    s().startSession({ task: "刷题", tag: "cs", type: "input" });
+    const start = s().session!.phaseStartedAt;
+    s().advancePomodoroPhase({ manual: true, now: start + 1_000 });
+    expect(s().session!.mode).toBe("running");
+    expect(s().session!.count).toBe(1);
+  });
+});
+
+// ===========================================================================
 // settle / spendFood
 // ===========================================================================
 describe("settle and spending", () => {

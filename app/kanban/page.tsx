@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { useStore } from "@/lib/store";
+import { AddKanbanSheet } from "@/components/sheets/AddKanbanSheet";
 
 // ─────────────────────────────────────────────────────────────────────────
 // Types
@@ -90,12 +91,13 @@ export default function KanbanPage() {
   const moveCard = useStore((s) => s.moveKanbanCard);
   const addCard = useStore((s) => s.addKanbanCard);
 
-  /** Prompt-based add (MVP — replace with proper sheet later if needed). */
-  const addNew = (col: ColId) => {
-    const name = window.prompt(`添加到 ${col === "inbox" ? "Inbox" : col} 的任务名`);
-    if (!name?.trim()) return;
+  /** Sheet-based add — opens AddKanbanSheet targeted at `col`. */
+  const [addSheetCol, setAddSheetCol] = useState<ColId | null>(null);
+  const addNew = (col: ColId) => setAddSheetCol(col);
+  const handleAddConfirm = ({ name, next }: { name: string; next: string }) => {
+    if (!addSheetCol) return;
     const id = `k-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    addCard({ col, card: { id, name: name.trim(), next: "" } });
+    addCard({ col: addSheetCol, card: { id, name, next: next || undefined } });
   };
 
   // Desktop drag state (UI-only, not persisted)
@@ -259,6 +261,16 @@ export default function KanbanPage() {
           onCancel={() => setMoveMenu(null)}
         />
       )}
+
+      {/* Add-card sheet — replaces window.prompt */}
+      <AddKanbanSheet
+        open={addSheetCol !== null}
+        onOpenChange={(open) => {
+          if (!open) setAddSheetCol(null);
+        }}
+        col={addSheetCol}
+        onConfirm={handleAddConfirm}
+      />
     </main>
   );
 }
@@ -396,10 +408,12 @@ function DesktopCardItem({
       )}
     >
       <div className="font-sans text-[13px] font-medium leading-snug text-ink">{card.name}</div>
-      <div className="mt-1 text-xs leading-snug text-ink-3">
-        <span className="text-ink-mute">→ </span>
-        {card.next}
-      </div>
+      {card.next && (
+        <div className="mt-1 text-xs leading-snug text-ink-3">
+          <span className="text-ink-mute">→ </span>
+          {card.next}
+        </div>
+      )}
     </div>
   );
 }
@@ -464,10 +478,12 @@ function MobileCardItem({
       )}
     >
       <div className="font-sans text-[14px] font-medium leading-snug text-ink">{card.name}</div>
-      <div className="mt-1 text-[12px] leading-snug text-ink-3">
-        <span className="text-ink-mute">→ </span>
-        {card.next}
-      </div>
+      {card.next && (
+        <div className="mt-1 text-[12px] leading-snug text-ink-3">
+          <span className="text-ink-mute">→ </span>
+          {card.next}
+        </div>
+      )}
     </div>
   );
 }

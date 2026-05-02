@@ -56,7 +56,20 @@ export default function SettingsPage() {
     } catch (e) {
       console.error("[settings] saveToCloud failed", e);
       setSyncStatus("err");
-      setSyncMsg("上传失败 · 看 console");
+      // Server actions surface error.message — match on the stable codes
+      // emitted by `SyncError` so we can give actionable hints.
+      const msg = e instanceof Error ? e.message : "";
+      if (msg.includes("UNAUTHENTICATED")) {
+        setSyncMsg("会话过期 · 重新登录");
+      } else if (msg.includes("PAYLOAD_TOO_LARGE")) {
+        setSyncMsg("数据过大 · 先清理历史再试");
+      } else if (msg.includes("INVALID_PAYLOAD")) {
+        setSyncMsg("数据格式异常 · 看 console");
+      } else if (msg.includes("RATE_LIMITED")) {
+        setSyncMsg("操作过于频繁 · 稍后再试");
+      } else {
+        setSyncMsg("上传失败 · 看 console");
+      }
     }
   };
 

@@ -17,9 +17,10 @@ export interface PomodoroSession {
   task: string;
   tag: TagId;
   type: SessionType;
-  startedAt: number; // ms epoch
-  count: number;
-  mode: SessionMode;
+  startedAt: number;       // ms epoch — session start (immutable)
+  phaseStartedAt: number;  // ms epoch — current phase (running/buffer) start
+  count: number;           // 1-based current pomodoro number
+  mode: SessionMode;       // current phase
   notes: string[];
 }
 
