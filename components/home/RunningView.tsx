@@ -19,6 +19,7 @@ import { useEffect, useRef, useState } from "react";
 import { TomatoIcon } from "@/components/animations/TomatoIcon";
 import { NotesSheet } from "@/components/sheets/NotesSheet";
 import { useStore } from "@/lib/store";
+import { startPushChain } from "@/app/actions/push";
 import { cn } from "@/lib/utils";
 import type { PomodoroSession, KanbanColumnId } from "@/lib/types";
 
@@ -213,7 +214,21 @@ export function RunningView({ session, onEnd }: RunningViewProps) {
         <BufferOverlay
           remainingMs={remainingMs}
           completedCount={count}
-          onContinue={() => advancePhase({ manual: true })}
+          onContinue={() => {
+            advancePhase({ manual: true });
+            // The local `now` we have here is up to 250ms stale;
+            // re-read from the store so the server-scheduled boundary
+            // matches what the local timer will display.
+            const fresh = useStore.getState().session;
+            if (fresh) {
+              void startPushChain({
+                sessionId: String(fresh.phaseStartedAt),
+                boundaryAt: fresh.phaseStartedAt + POMO_MS,
+                kind: "running-end",
+                count: fresh.count,
+              }).catch(() => {});
+            }
+          }}
           onEnd={triggerEnd}
         />
       )}

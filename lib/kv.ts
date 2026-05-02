@@ -38,4 +38,7 @@ export const kvKey = {
   userState: (userId: string) => `tokmato:user:${userId}:state`,
   pomodoros: (userId: string, dateKey: string) =>
     `tokmato:user:${userId}:pomos:${dateKey}`, // dateKey: YYYY-MM-DD (UTC+8 with 4am cutoff)
+  pushSubscription: (userId: string) => `tokmato:user:${userId}:push:sub`,
+  /** Currently-pending QStash messageId for the next phase boundary. */
+  pushPending: (userId: string) => `tokmato:user:${userId}:push:pending`,
 } as const;

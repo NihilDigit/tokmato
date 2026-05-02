@@ -6,6 +6,9 @@ import { StartSheet } from "@/components/sheets/StartSheet";
 import { SettleSheet } from "@/components/sheets/SettleSheet";
 import { RunningView } from "@/components/home/RunningView";
 import { useStore, todayKey } from "@/lib/store";
+import { startPushChain, cancelPushChain } from "@/app/actions/push";
+
+const POMO_MS = 25 * 60 * 1000;
 
 export default function HomePage() {
   // Live state from store
@@ -46,6 +49,9 @@ export default function HomePage() {
             addKanbanCard({ col: action, card: { id, name: note, next: "" } });
           }
           endSession({ completedCount });
+          // Tear down the server-side push chain so no further
+          // boundary notifications fire for the session we just ended.
+          void cancelPushChain().catch(() => {});
         }}
       />
     );
@@ -138,7 +144,20 @@ export default function HomePage() {
         onConfirm={(d) => {
           startSession(d);
           setOpenStart(false);
-          // Phase 5.2 will navigate to a /home running sub-route
+          // Schedule the first phase boundary on the server so a
+          // closed-browser user still gets the running-end alert.
+          // The chain self-perpetuates from there. sessionId is the
+          // current phaseStartedAt — manual advances rotate it,
+          // invalidating any in-flight QStash callbacks.
+          const fresh = useStore.getState().session;
+          if (fresh) {
+            void startPushChain({
+              sessionId: String(fresh.phaseStartedAt),
+              boundaryAt: fresh.phaseStartedAt + POMO_MS,
+              kind: "running-end",
+              count: fresh.count,
+            }).catch(() => {});
+          }
         }}
       />
       <SettleSheet

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Sun,
   Moon,
@@ -13,11 +13,20 @@ import {
   CloudDownload,
   GitBranch,
   ExternalLink,
+  Bell,
+  BellOff,
 } from "lucide-react";
 import { useSession, signIn, signOut } from "next-auth/react";
 import { useTheme } from "@/components/theme-provider";
 import { useStore } from "@/lib/store";
 import { saveToCloud, loadFromCloud } from "@/app/actions/sync";
+import {
+  isPushSupported,
+  getPermission,
+  enablePush,
+  disablePush,
+  getCurrentSubscription,
+} from "@/lib/push-client";
 import { cn } from "@/lib/utils";
 import { APP_VERSION } from "@/lib/version";
 
@@ -42,6 +51,57 @@ export default function SettingsPage() {
 
   const [syncStatus, setSyncStatus] = useState<SyncStatus>("idle");
   const [syncMsg, setSyncMsg] = useState<string>("");
+
+  // Push subscription state — initialized from the live SW registration.
+  const [pushSupported, setPushSupported] = useState(false);
+  const [pushOn, setPushOn] = useState(false);
+  const [pushBusy, setPushBusy] = useState(false);
+  const [pushMsg, setPushMsg] = useState<string>("");
+
+  useEffect(() => {
+    setPushSupported(isPushSupported());
+    if (!isPushSupported()) return;
+    void getCurrentSubscription().then((sub) => setPushOn(Boolean(sub)));
+  }, []);
+
+  const handleEnablePush = async () => {
+    setPushBusy(true);
+    setPushMsg("");
+    try {
+      const sub = await enablePush();
+      if (sub) {
+        setPushOn(true);
+        setPushMsg("已开启 · 浏览器关掉也能收到");
+      } else {
+        const perm = getPermission();
+        setPushMsg(
+          perm === "denied"
+            ? "权限被拒 · 去浏览器站点设置里改"
+            : "未授予权限"
+        );
+      }
+    } catch (e) {
+      console.error("[settings] enablePush failed", e);
+      setPushMsg("开启失败 · 看 console");
+    } finally {
+      setPushBusy(false);
+    }
+  };
+
+  const handleDisablePush = async () => {
+    setPushBusy(true);
+    setPushMsg("");
+    try {
+      await disablePush();
+      setPushOn(false);
+      setPushMsg("已关闭");
+    } catch (e) {
+      console.error("[settings] disablePush failed", e);
+      setPushMsg("关闭失败 · 看 console");
+    } finally {
+      setPushBusy(false);
+    }
+  };
 
   const handleSaveCloud = async () => {
     if (!session?.user) return;
@@ -242,6 +302,37 @@ export default function SettingsPage() {
       </Section>
 
       <Hairline />
+
+      <Hairline />
+
+      {/* ───────────── Push notifications ───────────── */}
+      <Section title="推送通知">
+        {!pushSupported ? (
+          <p className="text-sm text-ink-3">
+            当前浏览器不支持 Web Push (Safari 需要把 tokmato 安装到主屏幕才行)。
+          </p>
+        ) : !session?.user ? (
+          <p className="text-sm text-ink-3">登录 GitHub 后可开启,跨设备共用一套订阅。</p>
+        ) : (
+          <div className="flex flex-col gap-3">
+            <GhostRow
+              Icon={pushOn ? BellOff : Bell}
+              title={pushOn ? "关闭推送" : "开启推送"}
+              sub={
+                pushOn
+                  ? "番茄结束 / 缓冲结束的提醒走系统通知 · 即使关掉浏览器也能响"
+                  : "授权后浏览器关掉也能收到番茄到点提醒"
+              }
+              destructive={pushOn}
+              disabled={pushBusy}
+              onClick={pushOn ? handleDisablePush : handleEnablePush}
+            />
+            {pushMsg && (
+              <p className="text-xs text-ink-3">{pushMsg}</p>
+            )}
+          </div>
+        )}
+      </Section>
 
       <Hairline />
 

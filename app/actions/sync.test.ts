@@ -18,9 +18,18 @@ mock.module("@/auth", () => ({
 
 mock.module("@/lib/kv", () => ({
   requireRedis,
+  // Bun's module mocks persist for the entire test process, so this
+  // shape must include every key the real `kvKey` exposes — otherwise
+  // sibling test files that import `@/lib/kv` after this one see
+  // missing methods.
   kvKey: {
     userState: (userId: string) => `tokmato:user:${userId}:state`,
+    pomodoros: (userId: string, dateKey: string) =>
+      `tokmato:user:${userId}:pomos:${dateKey}`,
+    pushSubscription: (userId: string) => `tokmato:user:${userId}:push:sub`,
+    pushPending: (userId: string) => `tokmato:user:${userId}:push:pending`,
   },
+  redis: { set: redisSet, get: redisGet, incr: redisIncr, expire: redisExpire },
 }));
 
 const { loadFromCloud, saveToCloud } = await import("./sync");
