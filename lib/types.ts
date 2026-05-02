@@ -70,6 +70,7 @@ export interface UserState {
 
   // Settlement
   lastSettledDate: string | null; // YYYY-MM-DD (UTC+8, with 4am cutoff)
+  activeDay: string; // current tokmato day for daily counters
 
   // Current sessions
   session: PomodoroSession | null;
@@ -91,7 +92,8 @@ export interface UserState {
 export type PlayType = "active" | "passive";
 export interface PlaySession {
   type: PlayType;
-  totalMinutes: number; // requested duration
+  totalMinutes: number; // visible timer duration
+  costMinutes: number; // time-pool minutes deducted up front
   startedAt: number;    // ms epoch
 }
 

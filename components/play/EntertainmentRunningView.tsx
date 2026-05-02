@@ -41,6 +41,8 @@ export function EntertainmentRunningView({
   onEnd,
 }: EntertainmentRunningViewProps) {
   const totalSec = session.totalMinutes * 60;
+  const costMinutes = session.costMinutes ?? session.totalMinutes;
+  const refundScale = session.totalMinutes > 0 ? costMinutes / session.totalMinutes : 1;
   const elapsedAtMount = Math.floor((Date.now() - session.startedAt) / 1000);
   const [secondsLeft, setSecondsLeft] = useState(() =>
     Math.max(0, totalSec - elapsedAtMount)
@@ -78,8 +80,8 @@ export function EntertainmentRunningView({
       if (t >= 1) {
         if (holdTimerRef.current) clearInterval(holdTimerRef.current);
         setHolding(1);
-        // Refund unused minutes (rounded down)
-        const refund = Math.floor(secondsLeft / 60);
+        // Refund unused pool cost, not just visible timer minutes.
+        const refund = Math.floor((secondsLeft / 60) * refundScale);
         onEnd({ refundMinutes: refund });
       } else {
         setHolding(t);
@@ -95,7 +97,7 @@ export function EntertainmentRunningView({
   };
   useEffect(() => () => cancelHold(), []);
 
-  const progress = 1 - secondsLeft / totalSec;
+  const progress = totalSec > 0 ? 1 - secondsLeft / totalSec : 1;
 
   return (
     <div
@@ -130,7 +132,7 @@ export function EntertainmentRunningView({
           />
         </div>
         <div className="mono text-xs text-paper/60 tabular-nums">
-          {session.totalMinutes} min · 时间池已扣
+          {session.totalMinutes} min · 已扣 {costMinutes} min
         </div>
       </div>
 

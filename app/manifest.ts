@@ -8,8 +8,8 @@ export default function manifest(): MetadataRoute.Manifest {
       "番茄 token 系统：把学习产出和娱乐消费用诚实的会计单位连起来。",
     start_url: "/home",
     display: "standalone",
-    background_color: "#F4EFE6",
-    theme_color: "#F4EFE6",
+    background_color: "rgb(244 239 230)",
+    theme_color: "rgb(244 239 230)",
     orientation: "portrait",
     icons: [
       // Same PNG, declared twice with distinct purposes — Next's MetadataRoute

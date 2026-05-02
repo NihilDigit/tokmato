@@ -11,7 +11,16 @@ export function Providers({ children }: { children: React.ReactNode }) {
   // `skipHydration: true` in lib/store.ts) — keeps SSR HTML consistent
   // with the first client render.
   useEffect(() => {
-    useStore.persist.rehydrate();
+    const hydrated = useStore.persist.rehydrate();
+    if (hydrated instanceof Promise) {
+      void hydrated.then(() => {
+        useStore.getState().ensureToday();
+      });
+      return;
+    }
+    queueMicrotask(() => {
+      useStore.getState().ensureToday();
+    });
   }, []);
 
   // Read play session at the root so the timer overlay shows on any tab.

@@ -25,65 +25,40 @@ import type {
 } from "./types";
 
 // ─────────────────────────────────────────────────────────────────────────
-// Defaults — first-run mock; once user has data in storage, this is unused.
+// Defaults — first-run starter state; once user has data in storage, this is unused.
 // ─────────────────────────────────────────────────────────────────────────
-const DEFAULTS: UserState = {
-  ftoken: 12.5,
-  htoken: 4.5,
-  timePool: 47,
-  lastSettledDate: null,
-  session: null,
-  playSession: null,
-  todayMathPomos: 4,
-  todayPomos: 7,
-  wishlist: [
-    { id: "w1", name: "Kindle Paperwhite 第 12 代", price: 880, pay: "mixed", why: "把短视频时间换成读书。每月省一半 H 也能凑齐。", progress: 0.62 },
-    { id: "w2", name: "降噪耳塞 (Loop Quiet)", price: 180, pay: "F", why: "宿舍图书馆通用,降低专注启动摩擦。", progress: 0.41 },
-    { id: "w3", name: "《图兰朵》歌剧票", price: 280, pay: "F", why: "上次听完《波西米亚人》,半个月都在回味。", progress: 0.18 },
-    { id: "w4", name: "桌面金属支架", price: 95, pay: "mixed", why: "颈椎已经在抗议了。", progress: 0.78 },
-    { id: "w5", name: "LAMY Safari 钢笔", price: 220, pay: "F", why: "做题手感差,纸笔交互应该被升级。", progress: 0.05 },
-  ],
-  achievements: [
-    { id: "a1", name: "人体工学椅腰垫", price: 65, date: "2025-04-22", why: "第一次坐 4h 不腰酸。" },
-    { id: "a2", name: "《卡拉马佐夫兄弟》精装", price: 138, date: "2025-04-09", why: "攒了 11 天 F。读完夜宵预算又能多撑一周。" },
-    { id: "a3", name: "降噪耳机线 (升级)", price: 49, date: "2025-03-30", why: "小升级,大体感。" },
-    { id: "a4", name: "《图兰朵》歌剧票", price: 280, date: "2025-03-12", why: "第一次现场歌剧,难忘。" },
-  ],
-  kanban: {
-    inbox: [
-      { id: "k1", name: "想看那本 Operating Systems: Three Easy Pieces", next: "下载 PDF 试读 1 章" },
-      { id: "k2", name: "研究 jaxopt 库", next: "看 README + 跑 1 个例子" },
+const STARTER_FTOKEN = 10;
+const STARTER_HTOKEN = 5;
+
+function createStarterState(): UserState {
+  return {
+    ftoken: STARTER_FTOKEN,
+    htoken: STARTER_HTOKEN,
+    timePool: 0,
+    lastSettledDate: null,
+    activeDay: todayKey(),
+    session: null,
+    playSession: null,
+    todayMathPomos: 0,
+    todayPomos: 0,
+    wishlist: [],
+    achievements: [],
+    kanban: {
+      inbox: [],
+      Q1: [],
+      Q2: [],
+      Q3: [],
+      Q4: [],
+    },
+    recentTasks: [],
+    foodPresets: [
+      { id: "fp1", name: "可乐", price: 3.5 },
+      { id: "fp2", name: "雪糕", price: 5 },
     ],
-    Q1: [
-      { id: "k3", name: "考研数学线代第三章", next: "今晚 3 个番茄, 做完真题部分" },
-      { id: "k4", name: "英语阅读真题套", next: "完成 2017 阅读 4 篇" },
-    ],
-    Q2: [
-      { id: "k5", name: "Transformer from scratch 复现", next: "实现 multi-head attention forward pass" },
-      { id: "k6", name: "健身房抗阻训练", next: "今天 push day" },
-      { id: "k7", name: "读 Attention Is All You Need", next: "精读第 3 节" },
-    ],
-    Q3: [
-      { id: "k8", name: "报销学校发票", next: "收齐发票, 周三去财务" },
-      { id: "k9", name: "洗床单", next: "丢洗衣机" },
-    ],
-    Q4: [
-      { id: "k10", name: "《卡拉马佐夫兄弟》", next: "续读到第二部第三章" },
-      { id: "k11", name: "听<<图兰朵>>录音版", next: "第一幕" },
-    ],
-  },
-  recentTasks: [
-    "线代第 3 章",
-    "精读 Transformer paper",
-    "debug dataloader",
-    "英语阅读 2018 真题",
-    "vibe coding tomato app",
-  ],
-  foodPresets: [
-    { id: "fp1", name: "可乐", price: 3.5 },
-    { id: "fp2", name: "雪糕", price: 5 },
-  ],
-};
+  };
+}
+
+const DEFAULTS: UserState = createStarterState();
 
 // ─────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -107,6 +82,24 @@ export function todayKey(now: Date = new Date()): string {
 const round = (n: number, p = 1) => Math.round(n * 10 ** p) / 10 ** p;
 const clamp = (v: number, lo = 0, hi = Infinity) => Math.max(lo, Math.min(hi, v));
 
+function normalizeDay(s: Store): Partial<UserState> {
+  const nextDay = todayKey();
+  const activeDay = s.activeDay;
+  if (!activeDay) {
+    return {
+      activeDay: nextDay,
+      todayPomos: 0,
+      todayMathPomos: 0,
+    };
+  }
+  if (activeDay === nextDay) return {};
+  return {
+    activeDay: nextDay,
+    todayPomos: 0,
+    todayMathPomos: 0,
+  };
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // Store interface
 // ─────────────────────────────────────────────────────────────────────────
@@ -114,6 +107,7 @@ const clamp = (v: number, lo = 0, hi = Infinity) => Math.max(lo, Math.min(hi, v)
 interface StoreActions {
   // Settlement
   settle: (data: { fGained: number; hGained: number }) => void;
+  ensureToday: () => void;
 
   // Recharge time pool with F or H
   recharge: (data: { fSpent: number; hSpent: number; minutesGained: number }) => void;
@@ -122,12 +116,12 @@ interface StoreActions {
   spendFood: (data: { name: string; price: number; hSpent: number }) => void;
 
   // Entertainment session lifecycle (mirrors pomodoro)
-  startPlay: (data: { type: PlayType; minutes: number }) => void;
+  startPlay: (data: { type: PlayType; minutes: number; costMinutes?: number }) => void;
   endPlay: (data?: { refundMinutes?: number }) => void;
 
   // Pomodoro session lifecycle
   startSession: (data: { task: string; tag: TagId; type: SessionType }) => void;
-  endSession: () => void;
+  endSession: (data?: { completedCount?: number }) => void;
   addNoteToSession: (note: string) => void;
 
   // Kanban
@@ -161,31 +155,41 @@ export const useStore = create<Store>()(
 
       settle: ({ fGained, hGained }) =>
         set((s) => ({
+          ...normalizeDay(s),
           ftoken: round(s.ftoken + fGained),
           htoken: round(s.htoken + hGained),
           lastSettledDate: todayKey(),
         })),
 
+      ensureToday: () =>
+        set((s) => ({
+          ...normalizeDay(s),
+        })),
+
       recharge: ({ fSpent, hSpent, minutesGained }) =>
         set((s) => ({
+          ...normalizeDay(s),
           ftoken: round(clamp(s.ftoken - fSpent)),
           htoken: round(clamp(s.htoken - hSpent)),
           timePool: clamp(s.timePool + minutesGained),
         })),
 
-      startPlay: ({ type, minutes }) =>
+      startPlay: ({ type, minutes, costMinutes }) =>
         set((s) => {
           // Deduct upfront; endPlay can refund unused minutes if user
           // ends early. clamp avoids going negative if budget changed.
-          const actual = Math.min(minutes, s.timePool);
+          const requestedCost = costMinutes ?? minutes;
+          const actualCost = Math.min(requestedCost, s.timePool);
           const playSession: PlaySession = {
             type,
-            totalMinutes: actual,
+            totalMinutes: minutes,
+            costMinutes: actualCost,
             startedAt: Date.now(),
           };
           return {
+            ...normalizeDay(s),
             playSession,
-            timePool: clamp(s.timePool - actual),
+            timePool: clamp(s.timePool - actualCost),
           };
         }),
 
@@ -197,6 +201,7 @@ export const useStore = create<Store>()(
 
       spendFood: ({ hSpent }) =>
         set((s) => ({
+          ...normalizeDay(s),
           htoken: round(clamp(s.htoken - hSpent)),
         })),
 
@@ -210,27 +215,35 @@ export const useStore = create<Store>()(
           mode: "running",
           notes: [],
         };
-        set({ session });
+        set((s) => ({ ...normalizeDay(s), session }));
       },
 
-      endSession: () =>
+      endSession: (data) =>
         set((s) => {
           if (!s.session) return s;
+          const daily = normalizeDay(s);
+          const baseTodayPomos = daily.todayPomos ?? s.todayPomos;
+          const baseTodayMath = daily.todayMathPomos ?? s.todayMathPomos;
           const isInput = s.session.type === "input";
           const isMath = s.session.tag === "math";
-          const fGain = isInput ? 1 : 0.5;
-          const newTodayPomos = s.todayPomos + 1;
-          const newTodayMath = isMath ? s.todayMathPomos + 1 : s.todayMathPomos;
+          const completedCount = Math.max(0, data?.completedCount ?? s.session.count);
+          const fGain = (isInput ? 1 : 0.5) * completedCount;
+          const newTodayPomos = baseTodayPomos + completedCount;
+          const newTodayMath = isMath ? baseTodayMath + completedCount : baseTodayMath;
           // Math BONUS: hitting 5/7/9/11 #math pomos in a day awards
           // an extra +1F (per ladder visualized on Home).
           const MATH_MILESTONES = [5, 7, 9, 11];
-          const bonusF =
-            isMath && MATH_MILESTONES.includes(newTodayMath) ? 1 : 0;
+          const bonusF = isMath
+            ? MATH_MILESTONES.filter(
+                (m) => baseTodayMath < m && m <= newTodayMath
+              ).length
+            : 0;
           // Update recents
           const taskName = s.session.task;
           const filtered = s.recentTasks.filter((t) => t !== taskName);
           const recentTasks = [taskName, ...filtered].slice(0, 5);
           return {
+            ...daily,
             session: null,
             todayPomos: newTodayPomos,
             todayMathPomos: newTodayMath,
@@ -262,11 +275,13 @@ export const useStore = create<Store>()(
 
       addKanbanCard: ({ col, card }) =>
         set((s) => ({
+          ...normalizeDay(s),
           kanban: { ...s.kanban, [col]: [...s.kanban[col], card] },
         })),
 
       addFoodPreset: ({ name, price }) =>
         set((s) => ({
+          ...normalizeDay(s),
           foodPresets: [
             ...s.foodPresets,
             { id: `fp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, name, price },
@@ -287,6 +302,7 @@ export const useStore = create<Store>()(
 
       addWish: ({ name, price, pay, why }) =>
         set((s) => ({
+          ...normalizeDay(s),
           wishlist: [
             ...s.wishlist,
             {
@@ -307,10 +323,12 @@ export const useStore = create<Store>()(
 
       redeemWish: ({ wishId, fSpent, hSpent }) =>
         set((s) => {
+          const daily = normalizeDay(s);
           const wish = s.wishlist.find((w) => w.id === wishId);
           if (!wish) return s;
           if (fSpent > s.ftoken || hSpent > s.htoken) return s; // guard
           return {
+            ...daily,
             ftoken: round(clamp(s.ftoken - fSpent)),
             htoken: round(clamp(s.htoken - hSpent)),
             wishlist: s.wishlist.filter((w) => w.id !== wishId),
@@ -321,7 +339,7 @@ export const useStore = create<Store>()(
           };
         }),
 
-      reset: () => set(DEFAULTS),
+      reset: () => set(createStarterState()),
     }) as Store & {
       addRecentTask?: (t: string) => void; // private helper escape hatch
     },
@@ -340,6 +358,7 @@ export const useStore = create<Store>()(
         htoken: s.htoken,
         timePool: s.timePool,
         lastSettledDate: s.lastSettledDate,
+        activeDay: s.activeDay,
         session: s.session,
         playSession: s.playSession,
         todayMathPomos: s.todayMathPomos,

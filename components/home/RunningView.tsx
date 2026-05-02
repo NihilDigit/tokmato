@@ -55,7 +55,10 @@ export interface RunningViewProps {
   session: PomodoroSession;
   /** Called when the session is fully resolved (after notes review).
    *  `assignments` maps each note to a kanban column or "delete". */
-  onEnd: (assignments: { note: string; action: KanbanColumnId | "delete" }[]) => void;
+  onEnd: (
+    assignments: { note: string; action: KanbanColumnId | "delete" }[],
+    completedCount: number
+  ) => void;
 }
 
 export function RunningView({ session, onEnd }: RunningViewProps) {
@@ -141,9 +144,10 @@ export function RunningView({ session, onEnd }: RunningViewProps) {
     const finalNotes = noteDraft.trim()
       ? [...notes, noteDraft.trim()]
       : notes;
+    const awardCount = mode === "buffer" ? count : Math.max(0, count - 1);
     setPendingNotes(finalNotes);
     if (finalNotes.length === 0) {
-      onEnd([]);
+      onEnd([], awardCount);
     } else {
       setShowNotesSheet(true);
     }
@@ -151,7 +155,8 @@ export function RunningView({ session, onEnd }: RunningViewProps) {
 
   const handleNotesConfirm = (assignments: { note: string; action: KanbanColumnId | "delete" }[]) => {
     setShowNotesSheet(false);
-    onEnd(assignments);
+    const awardCount = mode === "buffer" ? count : Math.max(0, count - 1);
+    onEnd(assignments, awardCount);
   };
 
   // ─── Note input ─────────────────────────────────────────────────────────
@@ -336,8 +341,7 @@ function BufferOverlay({
       aria-label="缓冲期"
       className="fade-in fixed inset-0 z-[150] flex flex-col items-center justify-center gap-8"
       style={{
-        background:
-          "linear-gradient(180deg, rgba(244,239,230,0.96) 0%, rgba(244,216,207,0.96) 100%)",
+        background: "var(--buffer-bg)",
         backdropFilter: "blur(12px)",
         WebkitBackdropFilter: "blur(12px)",
       }}

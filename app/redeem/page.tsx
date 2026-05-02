@@ -417,9 +417,9 @@ function WaterPool({ value, max = 480 }: { value: number; max?: number }) {
             <stop offset="100%" stopColor="var(--teal-deep)" stopOpacity="1" />
           </linearGradient>
           <radialGradient id="tk-pool-glass" cx="0.32" cy="0.28" r="0.85">
-            <stop offset="0%" stopColor="rgba(255,255,255,.55)" />
-            <stop offset="55%" stopColor="rgba(180,200,205,.10)" />
-            <stop offset="100%" stopColor="rgba(0,0,0,.06)" />
+            <stop offset="0%" stopColor="var(--glass-highlight-55)" />
+            <stop offset="55%" stopColor="var(--pool-glass-mid)" />
+            <stop offset="100%" stopColor="var(--glass-shadow)" />
           </radialGradient>
         </defs>
 
@@ -438,7 +438,7 @@ function WaterPool({ value, max = 480 }: { value: number; max?: number }) {
               x2={r - (r - 14) * Math.sin(Math.acos(1 - 2 * t))}
               y1={POOL_SIZE - t * POOL_SIZE}
               y2={POOL_SIZE - t * POOL_SIZE}
-              stroke="rgba(255,255,255,.55)"
+              stroke="var(--glass-highlight-55)"
               strokeWidth="0.8"
             />
           ))}
@@ -451,7 +451,7 @@ function WaterPool({ value, max = 480 }: { value: number; max?: number }) {
         <path
           d={`M ${r - r * 0.55} ${r * 0.45} A ${r * 0.85} ${r * 0.85} 0 0 1 ${r * 0.55} ${r - r * 0.55}`}
           fill="none"
-          stroke="rgba(255,255,255,.7)"
+          stroke="var(--glass-highlight-70)"
           strokeWidth="1.4"
           opacity="0.55"
         />

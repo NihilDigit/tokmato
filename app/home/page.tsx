@@ -36,13 +36,13 @@ export default function HomePage() {
     return (
       <RunningView
         session={session}
-        onEnd={(assignments) => {
+        onEnd={(assignments, completedCount) => {
           for (const { note, action } of assignments) {
             if (action === "delete") continue;
             const id = `n-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
             addKanbanCard({ col: action, card: { id, name: note, next: "" } });
           }
-          endSession();
+          endSession({ completedCount });
         }}
       />
     );

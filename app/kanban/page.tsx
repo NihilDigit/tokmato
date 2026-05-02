@@ -649,7 +649,7 @@ function RadialMoveMenu({
           cy={ay}
           r={RADIUS}
           fill="none"
-          stroke="rgba(244,239,230,0.20)"
+          stroke="var(--paper-ring-20)"
           strokeWidth="1"
         />
         {/* Dead-zone ring — clearly dashed */}
@@ -658,7 +658,7 @@ function RadialMoveMenu({
           cy={ay}
           r={DEAD_ZONE}
           fill="none"
-          stroke="rgba(244,239,230,0.45)"
+          stroke="var(--paper-ring-45)"
           strokeWidth="1.25"
           strokeDasharray="4 5"
         />
@@ -668,16 +668,16 @@ function RadialMoveMenu({
           y1={ay}
           x2={pointer.x}
           y2={pointer.y}
-          stroke="rgba(244,239,230,0.85)"
+          stroke="var(--paper-line-85)"
           strokeWidth="2"
           strokeLinecap="round"
         />
         {/* Origin dot */}
-        <circle cx={ax} cy={ay} r="5" fill="#F4EFE6" />
+        <circle cx={ax} cy={ay} r="5" fill="var(--paper)" />
         {/* Finger-following dot — accent + soft halo */}
-        <circle cx={pointer.x} cy={pointer.y} r="18" fill="rgba(225,74,43,0.18)" />
-        <circle cx={pointer.x} cy={pointer.y} r="11" fill="#E14A2B" />
-        <circle cx={pointer.x} cy={pointer.y} r="11" fill="none" stroke="#F4EFE6" strokeWidth="1.5" />
+        <circle cx={pointer.x} cy={pointer.y} r="18" fill="var(--tomato-halo)" />
+        <circle cx={pointer.x} cy={pointer.y} r="11" fill="var(--tomato)" />
+        <circle cx={pointer.x} cy={pointer.y} r="11" fill="none" stroke="var(--paper)" strokeWidth="1.5" />
       </svg>
 
       {/* Card name hint — pill on dark backdrop, high contrast */}

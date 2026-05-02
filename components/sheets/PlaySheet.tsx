@@ -18,7 +18,7 @@ export interface PlaySheetProps {
   onOpenChange: (open: boolean) => void;
   /** 当前时间池剩余分钟。Slider 上限受其约束。 */
   timePool: number;
-  onConfirm: (data: { minutes: number; type: PlayType }) => void;
+  onConfirm: (data: { minutes: number; costMinutes: number; type: PlayType }) => void;
 }
 
 const MIN_MINUTES = 5;
@@ -53,7 +53,7 @@ export function PlaySheet({
 
   const handleConfirm = () => {
     if (overBudget || poolEmpty) return;
-    onConfirm({ minutes, type });
+    onConfirm({ minutes, costMinutes: cost, type });
     onOpenChange(false);
   };
 

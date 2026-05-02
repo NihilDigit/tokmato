@@ -2,16 +2,6 @@
 
 import { useEffect, useRef } from "react";
 
-const COLORS = [
-  "#E14A2B",
-  "#C8943A",
-  "#6F8265",
-  "#1A1614",
-  "#D9786A",
-  "#F4D8CF",
-  "#7B4A6A",
-];
-
 export interface ConfettiProps {
   active: boolean;
   onDone?: () => void;
@@ -66,6 +56,16 @@ export function Confetti({ active, onDone }: ConfettiProps) {
     const H = canvas.clientHeight;
     const cx = W / 2;
     const cy = H * 0.45;
+    const styles = getComputedStyle(document.documentElement);
+    const colors = [
+      "--tomato",
+      "--gold",
+      "--sage",
+      "--ink",
+      "--confetti-coral",
+      "--tomato-soft",
+      "--plum",
+    ].map((name) => styles.getPropertyValue(name).trim());
 
     const particles: Particle[] = [];
     const burstTimers: ReturnType<typeof setTimeout>[] = [];
@@ -84,7 +84,7 @@ export function Confetti({ active, onDone }: ConfettiProps) {
             rot: Math.random() * Math.PI * 2,
             vrot: (Math.random() - 0.5) * 0.4,
             size: 6 + Math.random() * 8,
-            color: COLORS[Math.floor(Math.random() * COLORS.length)],
+            color: colors[Math.floor(Math.random() * colors.length)],
             shape: Math.random() > 0.5 ? "rect" : "circle",
             life: 1,
           });

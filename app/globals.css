@@ -45,6 +45,28 @@
   --teal-deep: #335c5d;
   --teal-soft: #c9dddd;
   --plum: #7b4a6a;
+  --white: #ffffff;
+  --black: #000000;
+  --tomato-hot: #ff6b47;
+  --sage-leaf: #7b9170;
+  --sage-leaf-deep: #5f7257;
+  --confetti-coral: #d9786a;
+
+  --ink-outline: color-mix(in srgb, var(--ink) 18%, transparent);
+  --white-glint: color-mix(in srgb, var(--white) 35%, transparent);
+  --glass-highlight-55: color-mix(in srgb, var(--white) 55%, transparent);
+  --glass-highlight-70: color-mix(in srgb, var(--white) 70%, transparent);
+  --glass-shadow: color-mix(in srgb, var(--black) 6%, transparent);
+  --pool-glass-mid: color-mix(in srgb, var(--teal-soft) 10%, transparent);
+  --paper-ring-20: color-mix(in srgb, var(--paper) 20%, transparent);
+  --paper-ring-45: color-mix(in srgb, var(--paper) 45%, transparent);
+  --paper-line-85: color-mix(in srgb, var(--paper) 85%, transparent);
+  --tomato-halo: color-mix(in srgb, var(--tomato) 18%, transparent);
+  --buffer-bg: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--paper) 96%, transparent) 0%,
+    color-mix(in srgb, var(--tomato-soft) 96%, transparent) 100%
+  );
 
   /* Type families */
   --font-serif: "CJKKai", var(--font-instrument-serif), "Iowan Old Style", Georgia, serif;
@@ -91,7 +113,7 @@
   --muted: var(--paper-2);
   --muted-foreground: var(--ink-3);
   --accent: var(--tomato);
-  --accent-foreground: #ffffff;
+  --accent-foreground: var(--white);
   --destructive: var(--plum);
   --border: var(--rule);
   --input: var(--rule);

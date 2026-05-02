@@ -11,8 +11,8 @@ export interface TomatoIconProps {
  * Tomato SVG icon with countdown-progress fill.
  *
  * Server Component (no hooks beyond `useId`, no client-side state). Brand
- * colors are inlined as hex because SVG `<stop stop-color>` and `<path fill>`
- * attributes don't resolve CSS custom properties.
+ * colors are resolved through tokmato CSS variables so light/dark theme and
+ * token audits stay centralized in globals.css.
  *
  * Visual layers:
  *  - Body outline: dashed stroke, always visible.
@@ -47,9 +47,9 @@ export function TomatoIcon({ progress = 0, size = 220 }: TomatoIconProps) {
           <rect x="0" y={rectY} width="200" height={rectH} />
         </clipPath>
         <radialGradient id={gradId} cx="35%" cy="30%" r="70%">
-          <stop offset="0%" stopColor="#FF6B47" />
-          <stop offset="60%" stopColor="#E14A2B" />
-          <stop offset="100%" stopColor="#B83A20" />
+          <stop offset="0%" stopColor="var(--tomato-hot)" />
+          <stop offset="60%" stopColor="var(--tomato)" />
+          <stop offset="100%" stopColor="var(--tomato-deep)" />
         </radialGradient>
       </defs>
 
@@ -57,7 +57,7 @@ export function TomatoIcon({ progress = 0, size = 220 }: TomatoIconProps) {
       <path
         d={bodyPath}
         fill="none"
-        stroke="rgba(26,22,20,0.18)"
+        stroke="var(--ink-outline)"
         strokeWidth="2"
         strokeDasharray="3 4"
       />
@@ -70,7 +70,7 @@ export function TomatoIcon({ progress = 0, size = 220 }: TomatoIconProps) {
           cy="80"
           rx="22"
           ry="14"
-          fill="rgba(255,255,255,0.35)"
+          fill="var(--white-glint)"
           transform="rotate(-25 72 80)"
         />
       </g>
@@ -79,15 +79,15 @@ export function TomatoIcon({ progress = 0, size = 220 }: TomatoIconProps) {
       <g>
         <path
           d="M100 38 C 95 25, 90 18, 80 14 C 86 22, 86 30, 90 36"
-          fill="#6F8265"
+          fill="var(--sage)"
         />
         <path
           d="M100 38 C 105 25, 112 20, 124 18 C 116 24, 112 30, 108 38"
-          fill="#7B9170"
+          fill="var(--sage-leaf)"
         />
         <path
           d="M100 38 C 100 28, 102 22, 105 16 C 102 24, 102 32, 102 40"
-          fill="#5F7257"
+          fill="var(--sage-leaf-deep)"
         />
       </g>
     </svg>
