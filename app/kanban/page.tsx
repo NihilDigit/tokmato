@@ -83,38 +83,9 @@ const COL_BY_ID: Record<ColId, Col> = COLS.reduce(
 );
 
 // ─────────────────────────────────────────────────────────────────────────
-// Mock data — 1:1 from legacy state.kanban
-// ─────────────────────────────────────────────────────────────────────────
-const INITIAL: Record<ColId, Card[]> = {
-  inbox: [
-    { id: "k1", name: "想看那本 Operating Systems: Three Easy Pieces", next: "下载 PDF 试读 1 章" },
-    { id: "k2", name: "研究 jaxopt 库", next: "看 README + 跑 1 个例子" },
-  ],
-  Q1: [
-    { id: "k3", name: "考研数学线代第三章", next: "今晚 3 个番茄, 做完真题部分" },
-    { id: "k4", name: "英语阅读真题套", next: "完成 2017 阅读 4 篇" },
-  ],
-  Q2: [
-    { id: "k5", name: "Transformer from scratch 复现", next: "实现 multi-head attention forward pass" },
-    { id: "k6", name: "健身房抗阻训练", next: "今天 push day" },
-    { id: "k7", name: "读 Attention Is All You Need", next: "精读第 3 节" },
-  ],
-  Q3: [
-    { id: "k8", name: "报销学校发票", next: "收齐发票, 周三去财务" },
-    { id: "k9", name: "洗床单", next: "丢洗衣机" },
-  ],
-  Q4: [
-    { id: "k10", name: "《卡拉马佐夫兄弟》", next: "续读到第二部第三章" },
-    { id: "k11", name: "听<<图兰朵>>录音版", next: "第一幕" },
-  ],
-};
-
-// ─────────────────────────────────────────────────────────────────────────
 // Page
 // ─────────────────────────────────────────────────────────────────────────
 export default function KanbanPage() {
-  // Live state from store. (INITIAL is unused — kept for type ref. Phase 6 cleanup.)
-  void INITIAL;
   const cards = useStore((s) => s.kanban) as Record<ColId, Card[]>;
   const moveCard = useStore((s) => s.moveKanbanCard);
   const addCard = useStore((s) => s.addKanbanCard);

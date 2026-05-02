@@ -22,6 +22,7 @@ import type {
   FoodPreset,
   TagId,
   SessionType,
+  PomodoroRecord,
 } from "./types";
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -41,6 +42,10 @@ function createStarterState(): UserState {
     playSession: null,
     todayMathPomos: 0,
     todayPomos: 0,
+    todayFGained: 0,
+    todayHGained: 0,
+    todayPoolGained: 0,
+    pomodoroHistory: [],
     wishlist: [],
     achievements: [],
     kanban: {
@@ -90,6 +95,9 @@ function normalizeDay(s: Store): Partial<UserState> {
       activeDay: nextDay,
       todayPomos: 0,
       todayMathPomos: 0,
+      todayFGained: 0,
+      todayHGained: 0,
+      todayPoolGained: 0,
     };
   }
   if (activeDay === nextDay) return {};
@@ -97,6 +105,9 @@ function normalizeDay(s: Store): Partial<UserState> {
     activeDay: nextDay,
     todayPomos: 0,
     todayMathPomos: 0,
+    todayFGained: 0,
+    todayHGained: 0,
+    todayPoolGained: 0,
   };
 }
 
@@ -154,12 +165,17 @@ export const useStore = create<Store>()(
       ...DEFAULTS,
 
       settle: ({ fGained, hGained }) =>
-        set((s) => ({
-          ...normalizeDay(s),
-          ftoken: round(s.ftoken + fGained),
-          htoken: round(s.htoken + hGained),
-          lastSettledDate: todayKey(),
-        })),
+        set((s) => {
+          const daily = normalizeDay(s);
+          return {
+            ...daily,
+            ftoken: round(s.ftoken + fGained),
+            htoken: round(s.htoken + hGained),
+            todayFGained: round((daily.todayFGained ?? s.todayFGained ?? 0) + fGained),
+            todayHGained: round((daily.todayHGained ?? s.todayHGained ?? 0) + hGained),
+            lastSettledDate: todayKey(),
+          };
+        }),
 
       ensureToday: () =>
         set((s) => ({
@@ -167,12 +183,16 @@ export const useStore = create<Store>()(
         })),
 
       recharge: ({ fSpent, hSpent, minutesGained }) =>
-        set((s) => ({
-          ...normalizeDay(s),
-          ftoken: round(clamp(s.ftoken - fSpent)),
-          htoken: round(clamp(s.htoken - hSpent)),
-          timePool: clamp(s.timePool + minutesGained),
-        })),
+        set((s) => {
+          const daily = normalizeDay(s);
+          return {
+            ...daily,
+            ftoken: round(clamp(s.ftoken - fSpent)),
+            htoken: round(clamp(s.htoken - hSpent)),
+            timePool: clamp(s.timePool + minutesGained),
+            todayPoolGained: (daily.todayPoolGained ?? s.todayPoolGained ?? 0) + minutesGained,
+          };
+        }),
 
       startPlay: ({ type, minutes, costMinutes }) =>
         set((s) => {
@@ -224,6 +244,7 @@ export const useStore = create<Store>()(
           const daily = normalizeDay(s);
           const baseTodayPomos = daily.todayPomos ?? s.todayPomos;
           const baseTodayMath = daily.todayMathPomos ?? s.todayMathPomos;
+          const baseTodayF = daily.todayFGained ?? s.todayFGained ?? 0;
           const isInput = s.session.type === "input";
           const isMath = s.session.tag === "math";
           const completedCount = Math.max(0, data?.completedCount ?? s.session.count);
@@ -238,16 +259,37 @@ export const useStore = create<Store>()(
                 (m) => baseTodayMath < m && m <= newTodayMath
               ).length
             : 0;
+          const totalFGain = fGain + bonusF;
           // Update recents
           const taskName = s.session.task;
           const filtered = s.recentTasks.filter((t) => t !== taskName);
           const recentTasks = [taskName, ...filtered].slice(0, 5);
+          const endedAt = Date.now();
+          const record: PomodoroRecord | null = completedCount > 0
+            ? {
+                id: `p-${endedAt}-${Math.random().toString(36).slice(2, 6)}`,
+                task: taskName,
+                tag: s.session.tag,
+                type: s.session.type,
+                count: completedCount,
+                minutes: completedCount * 25,
+                fGained: fGain,
+                bonusF,
+                startedAt: s.session.startedAt,
+                endedAt,
+                dayKey: todayKey(new Date(endedAt)),
+              }
+            : null;
           return {
             ...daily,
             session: null,
             todayPomos: newTodayPomos,
             todayMathPomos: newTodayMath,
-            ftoken: round(s.ftoken + fGain + bonusF),
+            todayFGained: round(baseTodayF + totalFGain),
+            ftoken: round(s.ftoken + totalFGain),
+            pomodoroHistory: record
+              ? [record, ...(s.pomodoroHistory ?? [])].slice(0, 500)
+              : s.pomodoroHistory ?? [],
             recentTasks,
           };
         }),
@@ -363,6 +405,10 @@ export const useStore = create<Store>()(
         playSession: s.playSession,
         todayMathPomos: s.todayMathPomos,
         todayPomos: s.todayPomos,
+        todayFGained: s.todayFGained,
+        todayHGained: s.todayHGained,
+        todayPoolGained: s.todayPoolGained,
+        pomodoroHistory: s.pomodoroHistory,
         wishlist: s.wishlist,
         achievements: s.achievements,
         kanban: s.kanban,

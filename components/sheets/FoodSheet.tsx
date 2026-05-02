@@ -8,7 +8,8 @@
  *         右上角"编辑"切到编辑模式（改名/改价/删除/添加）。
  *   外卖/外食：一次性、数额不定的 — 自定义名 + slider 价格。
  *
- * 经济模型：1 H = ¥10。余额不足时 disabled。
+ * 防暴食经济模型：食物饮料只能用 H，且 1 H = ¥5。
+ * Wishlist 兑现里的 H 仍是 1 H = ¥10。
  */
 
 import { useState, useEffect } from "react";
@@ -17,7 +18,8 @@ import { ResponsiveSheet } from "@/components/ui/responsive-sheet";
 import { cn } from "@/lib/utils";
 import { useStore } from "@/lib/store";
 
-const PRICE_TO_H = (price: number) => Math.round((price / 10) * 100) / 100;
+const FOOD_H_RATE = 5;
+const PRICE_TO_H = (price: number) => Math.round((price / FOOD_H_RATE) * 100) / 100;
 const fmtH = (h: number) =>
   h % 1 === 0 ? h.toFixed(0) : h.toFixed(h < 1 ? 2 : 1);
 
@@ -89,9 +91,14 @@ export function FoodSheet({
       {/* Pool readout */}
       <div className="flex items-baseline justify-between border-b border-rule pb-4">
         <span className="smallcaps">HToken</span>
-        <span className="mono text-balance-num text-sage tabular-nums">
-          {htoken}
-          <span className="ml-1 text-sm font-normal text-ink-3">H</span>
+        <span className="flex flex-col items-end gap-1">
+          <span className="mono text-balance-num text-sage tabular-nums">
+            {htoken}
+            <span className="ml-1 text-sm font-normal text-ink-3">H</span>
+          </span>
+          <span className="mono text-[11px] text-ink-3">
+            食物 ¥{Math.floor(htoken * FOOD_H_RATE)}
+          </span>
         </span>
       </div>
 

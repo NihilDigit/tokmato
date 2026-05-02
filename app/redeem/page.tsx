@@ -28,8 +28,9 @@ export default function RedeemPage() {
   const removeWish = useStore((s) => s.removeWish);
 
   const fYuan = ftoken * 5;
-  const hYuan = htoken * 10;
-  const totalYuan = fYuan + hYuan;
+  const hWishYuan = htoken * 10;
+  const hFoodYuan = htoken * 5;
+  const totalYuan = fYuan + hWishYuan;
 
   const [openPool, setOpenPool] = useState(false);
   const [openPlay, setOpenPlay] = useState(false);
@@ -51,7 +52,7 @@ export default function RedeemPage() {
           <div className="flex flex-col gap-4">
             <div className="grid grid-cols-2 overflow-hidden rounded-lg border border-rule bg-paper">
               <BalanceCell kicker="FToken" value={ftoken} unit={`F · ¥${fYuan.toFixed(0)}`} color="text-tomato" />
-              <BalanceCell kicker="HToken" value={htoken} unit={`H · ¥${hYuan.toFixed(0)}`} color="text-sage-deep" border />
+              <BalanceCell kicker="HToken" value={htoken} unit={`H · 清单 ¥${hWishYuan.toFixed(0)}`} color="text-sage-deep" border />
             </div>
 
             <div className="flex flex-wrap items-baseline gap-3">
@@ -98,7 +99,7 @@ export default function RedeemPage() {
         <SpendCard
           icon={<CupIcon />}
           title="吃点好的"
-          sub="消费 HToken"
+          sub={`只用 HToken · ¥${hFoodYuan.toFixed(0)}`}
           accent="text-sage-deep"
           tint="bg-sage-soft/30"
           onClick={() => setOpenFood(true)}
@@ -368,6 +369,7 @@ function WaterPool({ value, max = 480 }: { value: number; max?: number }) {
   const r = POOL_SIZE / 2;
   const surfaceY = POOL_SIZE - fillPct * POOL_SIZE;
   const waveAmp = 3 + fillPct * 2;
+  const hasWater = value > 0;
 
   // Build a sine-wave path that tiles 2x horizontally so we can translate by
   // -POOL_SIZE without showing a seam.
@@ -426,23 +428,25 @@ function WaterPool({ value, max = 480 }: { value: number; max?: number }) {
         {/* glass body */}
         <circle cx={r} cy={r} r={r - 1} fill="url(#tk-pool-glass)" />
 
-        {/* water clipped to circle — two waves translating left for the loop */}
-        <g clipPath="url(#tk-pool-clip)">
-          <path d={wavePathA} fill="url(#tk-pool-water)" className="tk-wave-a" />
-          <path d={wavePathB} fill="var(--teal)" opacity="0.28" className="tk-wave-b" />
-          {/* fill ticks every 25% */}
-          {[0.25, 0.5, 0.75].map((t, i) => (
-            <line
-              key={i}
-              x1={r - (r - 8) * Math.sin(Math.acos(1 - 2 * t))}
-              x2={r - (r - 14) * Math.sin(Math.acos(1 - 2 * t))}
-              y1={POOL_SIZE - t * POOL_SIZE}
-              y2={POOL_SIZE - t * POOL_SIZE}
-              stroke="var(--glass-highlight-55)"
-              strokeWidth="0.8"
-            />
-          ))}
-        </g>
+        {/* water clipped to circle — omitted at 0 so empty pool has no wave */}
+        {hasWater && (
+          <g clipPath="url(#tk-pool-clip)">
+            <path d={wavePathA} fill="url(#tk-pool-water)" className="tk-wave-a" />
+            <path d={wavePathB} fill="var(--teal)" opacity="0.28" className="tk-wave-b" />
+            {/* fill ticks every 25% */}
+            {[0.25, 0.5, 0.75].map((t, i) => (
+              <line
+                key={i}
+                x1={r - (r - 8) * Math.sin(Math.acos(1 - 2 * t))}
+                x2={r - (r - 14) * Math.sin(Math.acos(1 - 2 * t))}
+                y1={POOL_SIZE - t * POOL_SIZE}
+                y2={POOL_SIZE - t * POOL_SIZE}
+                stroke="var(--glass-highlight-55)"
+                strokeWidth="0.8"
+              />
+            ))}
+          </g>
+        )}
 
         {/* outer ring */}
         <circle cx={r} cy={r} r={r - 1} fill="none" stroke="var(--ink-3)" strokeWidth="1" opacity="0.55" />

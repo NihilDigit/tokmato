@@ -11,12 +11,15 @@ import {
   Trash2,
   CloudUpload,
   CloudDownload,
+  GitBranch,
+  ExternalLink,
 } from "lucide-react";
 import { useSession, signIn, signOut } from "next-auth/react";
 import { useTheme } from "@/components/theme-provider";
 import { useStore } from "@/lib/store";
 import { saveToCloud, loadFromCloud } from "@/app/actions/sync";
 import { cn } from "@/lib/utils";
+import { APP_VERSION } from "@/lib/version";
 
 type SyncStatus = "idle" | "saving" | "loading" | "ok" | "err";
 
@@ -106,11 +109,11 @@ export default function SettingsPage() {
   };
 
   const clearCache = () => {
-    if (!confirm("清空本地所有 token / 番茄记录 / 愿望? 不能撤销。")) return;
+    if (!confirm("清空本地记录并回到 10 F / 5 H 的初始状态? 不能撤销。")) return;
     try {
       localStorage.removeItem("tokmato:state");
       resetStore();
-      alert("已清空 · 刷新看效果");
+      alert("已回到初始状态");
     } catch (e) {
       console.error("[settings] clear failed", e);
     }
@@ -180,9 +183,14 @@ export default function SettingsPage() {
                 className="h-11 w-11 rounded-full border border-rule object-cover"
               />
             ) : (
-              <div className="flex h-11 w-11 items-center justify-center rounded-full border border-rule bg-paper-2 text-sm text-ink-3">
-                {(session.user.name ?? "?").slice(0, 1)}
-              </div>
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src="/icon.png"
+                alt="tokmato"
+                width={44}
+                height={44}
+                className="h-11 w-11 rounded-full border border-rule bg-accent-foreground object-cover"
+              />
             )}
             <div className="flex flex-col">
               <span className="serif text-base text-ink">
@@ -272,7 +280,7 @@ export default function SettingsPage() {
           <GhostRow
             Icon={Trash2}
             title="清空本地数据"
-            sub="重置到 default mock state · 不能撤销"
+            sub="清空记录 · 回到 10 F / 5 H 初始状态"
             destructive
             onClick={clearCache}
           />
@@ -286,11 +294,21 @@ export default function SettingsPage() {
         <div className="flex flex-col gap-2">
           <div className="flex items-baseline gap-3">
             <span className="serif italic text-h3 leading-none">tokmato</span>
-            <span className="mono text-xs text-ink-3">v1.0</span>
+            <span className="mono text-xs text-ink-3">{APP_VERSION}</span>
           </div>
           <p className="max-w-prose text-sm leading-relaxed text-ink-2">
             番茄 token 系统：把学习产出和娱乐消费用诚实的会计单位连起来。
           </p>
+          <a
+            href="https://github.com/NihilDigit/tokmato"
+            target="_blank"
+            rel="noreferrer"
+            className="mt-2 inline-flex w-fit min-h-9 items-center gap-2 rounded-full border border-rule px-4 py-1.5 text-[13px] text-ink-2 transition hover:border-ink/30 hover:text-ink"
+          >
+            <GitBranch size={14} />
+            GitHub
+            <ExternalLink size={12} />
+          </a>
         </div>
       </Section>
     </main>

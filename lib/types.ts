@@ -23,6 +23,20 @@ export interface PomodoroSession {
   notes: string[];
 }
 
+export interface PomodoroRecord {
+  id: string;
+  task: string;
+  tag: TagId;
+  type: SessionType;
+  count: number;
+  minutes: number;
+  fGained: number;
+  bonusF: number;
+  startedAt: number;
+  endedAt: number;
+  dayKey: string;
+}
+
 export interface WishlistItem {
   id: string;
   name: string;
@@ -79,8 +93,12 @@ export interface UserState {
   // Today snapshot
   todayMathPomos: number;
   todayPomos: number;
+  todayFGained: number;
+  todayHGained: number;
+  todayPoolGained: number;
 
   // Persistent collections
+  pomodoroHistory: PomodoroRecord[];
   wishlist: WishlistItem[];
   achievements: AchievementItem[];
   kanban: KanbanState;

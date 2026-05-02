@@ -15,6 +15,9 @@ export default function HomePage() {
   const timePool = useStore((s) => s.timePool);
   const todayPomos = useStore((s) => s.todayPomos);
   const todayMath = useStore((s) => s.todayMathPomos);
+  const todayFGained = useStore((s) => s.todayFGained);
+  const todayHGained = useStore((s) => s.todayHGained);
+  const todayPoolGained = useStore((s) => s.todayPoolGained);
   const recentTasks = useStore((s) => s.recentTasks);
   const lastSettledDate = useStore((s) => s.lastSettledDate);
   const settleAction = useStore((s) => s.settle);
@@ -57,14 +60,15 @@ export default function HomePage() {
     setInitialTask(task);
     setOpenStart(true);
   };
+  const mathHint = nextMathBonusHint(todayMath);
 
   return (
     <main className="flex flex-col gap-6">
       {/* Top: balance strip — 3 columns, hairline-divided */}
       <section className="grid grid-cols-3 gap-px overflow-hidden rounded-xl border border-rule bg-rule">
-        <BalanceCell kicker="FToken" value={ftoken} unit="◆" hint="+3.5 今日" color="text-tomato" />
-        <BalanceCell kicker="HToken" value={htoken} unit="❖" hint="+1.5 今日" color="text-sage" />
-        <BalanceCell kicker="时间池" value={timePool} unit="min" hint="+30 今日" color="text-teal" />
+        <BalanceCell kicker="FToken" value={ftoken} unit="◆" hint={`${fmtSigned(todayFGained)} 今日`} color="text-tomato" />
+        <BalanceCell kicker="HToken" value={htoken} unit="❖" hint={`${fmtSigned(todayHGained)} 今日`} color="text-sage" />
+        <BalanceCell kicker="时间池" value={timePool} unit="min" hint={`${fmtSigned(todayPoolGained, "min")} 今日`} color="text-teal" />
       </section>
 
       {/* Settle banner — auto-shows once per day after 4am UTC+8 */}
@@ -120,7 +124,7 @@ export default function HomePage() {
           kicker="今日 · 数学 BONUS"
           value={todayMath}
           unit="个 #math 番茄"
-          hint="再做 1 个解锁 +1F bonus"
+          hint={mathHint}
           ladder
         />
       </section>
@@ -148,6 +152,20 @@ export default function HomePage() {
       />
     </main>
   );
+}
+
+function fmtSigned(value: number, unit = "") {
+  const rounded = Number.isInteger(value) ? value.toFixed(0) : value.toFixed(1);
+  const prefix = value > 0 ? "+" : "";
+  return `${prefix}${rounded}${unit ? " " + unit : ""}`;
+}
+
+function nextMathBonusHint(todayMath: number) {
+  const milestones = [5, 7, 9, 11];
+  const next = milestones.find((m) => todayMath < m);
+  if (!next) return "今日数学 bonus 已满";
+  const left = next - todayMath;
+  return `再做 ${left} 个解锁 +1F bonus`;
 }
 
 function BalanceCell({

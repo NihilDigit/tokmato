@@ -1,10 +1,14 @@
+"use client";
+
+import { useMemo } from "react";
 import { Download } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { todayKey, useStore } from "@/lib/store";
 
 // ─────────────────────────────────────────────────────────────────────────
 // Journey — 年度回顾
 // 信息密度：标题 + 5 stats + heatmap (52×7) + 学科分布 + 最近 20 串
-// 全部 Server Component；mock 数据 deterministic seed
+// 当前只展示本地 store 已有的真实记录；没有历史表时保持空态。
 // ─────────────────────────────────────────────────────────────────────────
 
 type TagId = "all" | "cs" | "math" | "english" | "others" | "trash";
@@ -55,52 +59,70 @@ const TAG_LABEL: Record<Exclude<TagId, "all">, string> = {
 };
 
 export default function JourneyPage() {
-  // Past 30 days (rolling) — not the calendar month, so today is always day 30.
+  const todayPomos = useStore((s) => s.todayPomos);
+  const htoken = useStore((s) => s.htoken);
+  const pomodoroHistory = useStore((s) => s.pomodoroHistory);
+
+  const last30Keys = useMemo(() => {
+    const keys: string[] = [];
+    for (let i = 29; i >= 0; i--) {
+      keys.push(todayKey(new Date(Date.now() - i * 86400000)));
+    }
+    return keys;
+  }, []);
+
+  const recentRecords = useMemo(
+    () => pomodoroHistory.filter((r) => last30Keys.includes(r.dayKey)),
+    [last30Keys, pomodoroHistory],
+  );
+
   const stats = {
-    totalPomos: 158,
-    totalHours: 65.8,
-    totalF: 124,
-    totalH: 78,
-    longestStreak: 14,
+    totalPomos: recentRecords.reduce((sum, r) => sum + r.count, 0),
+    totalHours: recentRecords.reduce((sum, r) => sum + r.minutes, 0) / 60,
+    totalF: recentRecords.reduce((sum, r) => sum + r.fGained + r.bonusF, 0),
+    totalH: htoken,
+    longestStreak: longestStreak(last30Keys, recentRecords),
   };
 
-  // Tag distribution (sums to 100)
-  const distribution: { tag: Exclude<TagId, "all">; pct: number }[] = [
-    { tag: "math", pct: 38 },
-    { tag: "cs", pct: 27 },
-    { tag: "english", pct: 18 },
-    { tag: "others", pct: 12 },
-    { tag: "trash", pct: 5 },
-  ];
+  const distribution: { tag: Exclude<TagId, "all">; pct: number }[] = useMemo(() => {
+    const total = recentRecords.reduce((sum, r) => sum + r.count, 0);
+    if (total <= 0) {
+      return [
+        { tag: "math", pct: 0 },
+        { tag: "cs", pct: 0 },
+        { tag: "english", pct: 0 },
+        { tag: "others", pct: 0 },
+        { tag: "trash", pct: 0 },
+      ];
+    }
+    const counts = recentRecords.reduce(
+      (acc, r) => {
+        acc[r.tag] += r.count;
+        return acc;
+      },
+      { cs: 0, math: 0, english: 0, others: 0, trash: 0 },
+    );
+    return (["math", "cs", "english", "others", "trash"] as const).map((tag) => ({
+      tag,
+      pct: Math.round((counts[tag] / total) * 100),
+    }));
+  }, [recentRecords]);
 
-  const recentStrings: {
-    task: string;
-    tag: Exclude<TagId, "all">;
-    count: number;
-    mins: number;
-    date: string;
-  }[] = [
-    { task: "线代第 3 章错题", tag: "math", count: 6, mins: 142, date: "今天 14:00" },
-    { task: "debug dataloader", tag: "cs", count: 3, mins: 76, date: "今天 10:30" },
-    { task: "英语阅读 2018", tag: "english", count: 4, mins: 100, date: "昨天 19:20" },
-    { task: "精读 Transformer paper", tag: "cs", count: 8, mins: 198, date: "昨天 13:00" },
-    { task: "vibe coding tomato", tag: "others", count: 5, mins: 124, date: "前天 21:00" },
-    { task: "政治马原", tag: "trash", count: 2, mins: 50, date: "前天 09:00" },
-    { task: "高数极限专题", tag: "math", count: 5, mins: 124, date: "5/12 16:00" },
-    { task: "pytorch 自定义 dataset", tag: "cs", count: 4, mins: 98, date: "5/11 10:00" },
-    { task: "英语作文模板背诵", tag: "english", count: 3, mins: 72, date: "5/10 21:30" },
-    { task: "概率论第 4 章", tag: "math", count: 7, mins: 168, date: "5/10 14:00" },
-    { task: "vim 配置整理", tag: "others", count: 2, mins: 48, date: "5/9 22:00" },
-    { task: "CUDA 入门 lecture 2", tag: "cs", count: 6, mins: 152, date: "5/9 13:00" },
-    { task: "微积分中值定理", tag: "math", count: 4, mins: 98, date: "5/8 15:00" },
-    { task: "英语听力慢速 VOA", tag: "english", count: 2, mins: 50, date: "5/8 09:00" },
-    { task: "Linux 内核 chap 3", tag: "cs", count: 5, mins: 122, date: "5/7 14:00" },
-    { task: "马原刷题", tag: "trash", count: 3, mins: 70, date: "5/7 19:00" },
-    { task: "线代第 2 章习题", tag: "math", count: 6, mins: 144, date: "5/6 14:30" },
-    { task: "Transformer 实现 forward", tag: "cs", count: 9, mins: 220, date: "5/5 10:00" },
-    { task: "英语精读 economist", tag: "english", count: 3, mins: 76, date: "5/4 20:00" },
-    { task: "高数不定积分", tag: "math", count: 5, mins: 122, date: "5/4 14:00" },
-  ];
+  const heatmapCounts = useMemo(() => {
+    const byDay = new Map<string, number>();
+    for (const record of recentRecords) {
+      byDay.set(record.dayKey, (byDay.get(record.dayKey) ?? 0) + record.count);
+    }
+    return last30Keys.map((key) => byDay.get(key) ?? 0);
+  }, [last30Keys, recentRecords]);
+
+  const recentStrings = recentRecords.slice(0, 20).map((record) => ({
+    task: record.task,
+    tag: record.tag,
+    count: record.count,
+    mins: record.minutes,
+    date: formatRecordTime(record.endedAt),
+  }));
 
   const activeTag: TagId = "all";
 
@@ -141,7 +163,7 @@ export default function JourneyPage() {
       <section className="flex flex-col gap-4">
         <SectionHead title="30 天的痕迹" />
 
-        {/* Tag filter row — drives heatmap tone (placeholder: active=all) */}
+        {/* Tag filter row — drives heatmap tone. */}
         <div className="flex flex-wrap gap-1.5">
           {TAGS.map((t) => {
             const active = t.id === activeTag;
@@ -166,7 +188,7 @@ export default function JourneyPage() {
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           {/* Left: heatmap */}
           <div className="rounded-xl border border-rule bg-paper p-5">
-            <Heatmap tag={activeTag} />
+            <Heatmap tag={activeTag} counts={heatmapCounts} />
             <div className="mono mt-3.5 flex items-center justify-between text-[11px] text-ink-mute">
               <span>30 天前</span>
               <div className="flex items-center gap-1.5">
@@ -211,6 +233,7 @@ export default function JourneyPage() {
           right={
             <button
               type="button"
+              onClick={() => exportJourneyJson(recentRecords)}
               className="inline-flex items-center gap-1.5 rounded-full border border-rule px-3.5 py-1.5 text-[13px] text-ink-2 transition hover:border-ink/30 hover:text-ink"
             >
               <Download size={13} />
@@ -221,7 +244,11 @@ export default function JourneyPage() {
 
         <div className="overflow-hidden rounded-xl border border-rule bg-paper">
           <div className="max-h-[520px] overflow-y-auto">
-            {recentStrings.map((r, i) => (
+            {recentStrings.length === 0 ? (
+              <p className="px-5 py-6 text-center text-[13px] text-ink-3">
+                番茄结束后会出现在这里
+              </p>
+            ) : recentStrings.map((r, i) => (
               <div
                 key={i}
                 className={cn(
@@ -307,6 +334,55 @@ function SectionHead({
   );
 }
 
+function longestStreak(
+  dayKeys: string[],
+  records: { dayKey: string; count: number }[],
+) {
+  const active = new Set(
+    records.filter((record) => record.count > 0).map((record) => record.dayKey),
+  );
+  let best = 0;
+  let current = 0;
+  for (const key of dayKeys) {
+    if (active.has(key)) {
+      current += 1;
+      best = Math.max(best, current);
+    } else {
+      current = 0;
+    }
+  }
+  return best;
+}
+
+function formatRecordTime(time: number) {
+  const d = new Date(time);
+  const now = new Date();
+  const sameDay = d.toDateString() === now.toDateString();
+  const yesterday = new Date(now.getTime() - 86400000);
+  const label = sameDay
+    ? "今天"
+    : d.toDateString() === yesterday.toDateString()
+      ? "昨天"
+      : `${d.getMonth() + 1}/${d.getDate()}`;
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  return `${label} ${hh}:${mm}`;
+}
+
+function exportJourneyJson(records: unknown[]) {
+  const blob = new Blob([JSON.stringify(records, null, 2)], {
+    type: "application/json",
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `tokmato-journey-${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 // Donut chart — token-driven slices, CSS-var-as-fill via inline style.
 const TAG_FILL: Record<Exclude<TagId, "all">, string> = {
   cs: "var(--ink)",
@@ -364,18 +440,11 @@ function Donut({
 // Reading order = time order: top-left = 29 days ago, bottom-right = today.
 // Colors flow through HEATMAP_TONE + opacity ladder. Each cell shows a
 // native browser tooltip on hover.
-function Heatmap({ tag }: { tag: TagId }) {
+function Heatmap({ tag, counts }: { tag: TagId; counts: number[] }) {
   const ROWS = 3;
   const COLS = 10;
   const TOTAL = ROWS * COLS; // 30
   const tone = HEATMAP_TONE[tag];
-
-  const seed = (s: string) => {
-    let h = 0;
-    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
-    return Math.abs(h);
-  };
-  const rng = (i: number, t: string) => (seed(`${i}-${t}`) % 1000) / 1000;
 
   const today = new Date();
 
@@ -390,11 +459,9 @@ function Heatmap({ tag }: { tag: TagId }) {
       {Array.from({ length: TOTAL }).map((_, i) => {
         // i = 0 → 29 days ago (top-left); i = 29 → today (bottom-right)
         const dayIndex = TOTAL - 1 - i;
-        const r = rng(dayIndex, tag);
-        const recency = 0.55 + ((30 - dayIndex) / 30) * 0.45;
-        const v = r * recency;
+        const pomos = counts[i] ?? 0;
         const level =
-          v > 0.78 ? 4 : v > 0.55 ? 3 : v > 0.3 ? 2 : v > 0.1 ? 1 : 0;
+          pomos >= 7 ? 4 : pomos >= 4 ? 3 : pomos >= 2 ? 2 : pomos >= 1 ? 1 : 0;
         const isEmpty = level === 0;
 
         const date = new Date(today.getTime() - dayIndex * 86400000);
@@ -402,7 +469,6 @@ function Heatmap({ tag }: { tag: TagId }) {
         const mm = String(date.getMonth() + 1).padStart(2, "0");
         const dd = String(date.getDate()).padStart(2, "0");
         const dateStr = `${yyyy}/${mm}/${dd}`;
-        const pomos = isEmpty ? 0 : Math.max(1, Math.round(v * 8));
 
         return (
           <div

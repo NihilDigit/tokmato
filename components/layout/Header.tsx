@@ -2,7 +2,9 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useSession } from "next-auth/react";
 import { cn } from "@/lib/utils";
+import { APP_VERSION } from "@/lib/version";
 
 type NavItem = {
   label: string;
@@ -19,6 +21,8 @@ const NAV_ITEMS: NavItem[] = [
 
 export default function Header() {
   const pathname = usePathname();
+  const { data: session } = useSession();
+  const avatarSrc = session?.user?.image ?? "/icon.png";
 
   return (
     <header className="mb-7 flex items-center justify-between gap-4">
@@ -33,13 +37,13 @@ export default function Header() {
         <span className="font-serif italic text-xl tracking-tight text-ink">
           tokmato
         </span>
-        <span className="smallcaps text-ink-mute">v1.0</span>
+        <span className="smallcaps text-ink-mute">{APP_VERSION}</span>
       </Link>
 
       {/* Center: segmented nav (desktop only) */}
       <nav
         aria-label="Primary"
-        className="desktop-only-nav bg-white/50 dark:bg-white/5 border border-rule rounded-full p-1 flex gap-1"
+        className="desktop-only-nav bg-paper-2/60 border border-rule rounded-full p-1 flex gap-1"
       >
         {NAV_ITEMS.map((item) => {
           const isActive =
@@ -67,10 +71,15 @@ export default function Header() {
         })}
       </nav>
 
-      {/* Right: avatar placeholder */}
-      <span className="size-7 rounded-full bg-ink text-paper grid place-items-center text-xs font-medium">
-        L
-      </span>
+      {/* Right: account avatar */}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={avatarSrc}
+        alt={session?.user?.name ? `${session.user.name} avatar` : "tokmato"}
+        width={28}
+        height={28}
+        className="size-7 rounded-full border border-rule bg-accent-foreground object-cover"
+      />
     </header>
   );
 }
