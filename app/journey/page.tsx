@@ -60,9 +60,8 @@ const TAG_LABEL: Record<Exclude<TagId, "all">, string> = {
 
 export default function JourneyPage() {
   const todayPomos = useStore((s) => s.todayPomos);
-  const ftoken = useStore((s) => s.ftoken);
-  const htoken = useStore((s) => s.htoken);
   const pomodoroHistory = useStore((s) => s.pomodoroHistory);
+  const tokenHistory = useStore((s) => s.tokenHistory);
 
   const last30Keys = useMemo(() => {
     const keys: string[] = [];
@@ -76,12 +75,16 @@ export default function JourneyPage() {
     () => pomodoroHistory.filter((r) => last30Keys.includes(r.dayKey)),
     [last30Keys, pomodoroHistory],
   );
+  const recentTokens = useMemo(
+    () => tokenHistory.filter((r) => last30Keys.includes(r.dayKey)),
+    [last30Keys, tokenHistory],
+  );
 
   const stats = {
     totalPomos: recentRecords.reduce((sum, r) => sum + r.count, 0),
     totalHours: recentRecords.reduce((sum, r) => sum + r.minutes, 0) / 60,
-    totalF: ftoken,
-    totalH: htoken,
+    totalF: recentTokens.reduce((sum, r) => sum + Math.max(0, r.fDelta), 0),
+    totalH: recentTokens.reduce((sum, r) => sum + Math.max(0, r.hDelta), 0),
     longestStreak: longestStreak(last30Keys, recentRecords),
   };
 

@@ -37,6 +37,17 @@ export interface PomodoroRecord {
   dayKey: string;
 }
 
+export interface TokenLedgerEntry {
+  id: string;
+  kind: "welcome" | "pomodoro" | "settle";
+  fDelta: number;
+  hDelta: number;
+  createdAt: number;
+  dayKey: string;
+  note?: string;
+  pomodoroRecordId?: string;
+}
+
 export interface WishlistItem {
   id: string;
   name: string;
@@ -96,9 +107,11 @@ export interface UserState {
   todayFGained: number;
   todayHGained: number;
   todayPoolGained: number;
+  welcomeGrantUserId: string | null;
 
   // Persistent collections
   pomodoroHistory: PomodoroRecord[];
+  tokenHistory: TokenLedgerEntry[];
   wishlist: WishlistItem[];
   achievements: AchievementItem[];
   kanban: KanbanState;

@@ -109,11 +109,11 @@ export default function SettingsPage() {
   };
 
   const clearCache = () => {
-    if (!confirm("清空本地记录并回到 10 F / 5 H 的初始状态? 不能撤销。")) return;
+    if (!confirm("清空本地记录并重置欢迎入账状态? 不能撤销。")) return;
     try {
       localStorage.removeItem("tokmato:state");
       resetStore();
-      alert("已回到初始状态");
+      alert("已清空本地记录");
     } catch (e) {
       console.error("[settings] clear failed", e);
     }
@@ -280,7 +280,7 @@ export default function SettingsPage() {
           <GhostRow
             Icon={Trash2}
             title="清空本地数据"
-            sub="清空记录 · 回到 10 F / 5 H 初始状态"
+            sub="清空记录 · 登录后静默发 +5 F / +10 H"
             destructive
             onClick={clearCache}
           />

@@ -23,18 +23,19 @@ import type {
   TagId,
   SessionType,
   PomodoroRecord,
+  TokenLedgerEntry,
 } from "./types";
 
 // ─────────────────────────────────────────────────────────────────────────
 // Defaults — first-run starter state; once user has data in storage, this is unused.
 // ─────────────────────────────────────────────────────────────────────────
-const STARTER_FTOKEN = 10;
-const STARTER_HTOKEN = 5;
+const WELCOME_FTOKEN = 5;
+const WELCOME_HTOKEN = 10;
 
 function createStarterState(): UserState {
   return {
-    ftoken: STARTER_FTOKEN,
-    htoken: STARTER_HTOKEN,
+    ftoken: 0,
+    htoken: 0,
     timePool: 0,
     lastSettledDate: null,
     activeDay: todayKey(),
@@ -45,7 +46,9 @@ function createStarterState(): UserState {
     todayFGained: 0,
     todayHGained: 0,
     todayPoolGained: 0,
+    welcomeGrantUserId: null,
     pomodoroHistory: [],
+    tokenHistory: [],
     wishlist: [],
     achievements: [],
     kanban: {
@@ -119,6 +122,7 @@ interface StoreActions {
   // Settlement
   settle: (data: { fGained: number; hGained: number }) => void;
   ensureToday: () => void;
+  grantWelcomeBonus: (userId: string) => void;
 
   // Recharge time pool with F or H
   recharge: (data: { fSpent: number; hSpent: number; minutesGained: number }) => void;
@@ -167,12 +171,23 @@ export const useStore = create<Store>()(
       settle: ({ fGained, hGained }) =>
         set((s) => {
           const daily = normalizeDay(s);
+          const createdAt = Date.now();
+          const entry: TokenLedgerEntry = {
+            id: `t-${createdAt}-${Math.random().toString(36).slice(2, 6)}`,
+            kind: "settle",
+            fDelta: fGained,
+            hDelta: hGained,
+            createdAt,
+            dayKey: todayKey(new Date(createdAt)),
+            note: "daily settle",
+          };
           return {
             ...daily,
             ftoken: round(s.ftoken + fGained),
             htoken: round(s.htoken + hGained),
             todayFGained: round((daily.todayFGained ?? s.todayFGained ?? 0) + fGained),
             todayHGained: round((daily.todayHGained ?? s.todayHGained ?? 0) + hGained),
+            tokenHistory: [entry, ...(s.tokenHistory ?? [])].slice(0, 1000),
             lastSettledDate: todayKey(),
           };
         }),
@@ -181,6 +196,31 @@ export const useStore = create<Store>()(
         set((s) => ({
           ...normalizeDay(s),
         })),
+
+      grantWelcomeBonus: (userId) =>
+        set((s) => {
+          if (!userId || s.welcomeGrantUserId === userId) return s;
+          const daily = normalizeDay(s);
+          const createdAt = Date.now();
+          const entry: TokenLedgerEntry = {
+            id: `t-${createdAt}-${Math.random().toString(36).slice(2, 6)}`,
+            kind: "welcome",
+            fDelta: WELCOME_FTOKEN,
+            hDelta: WELCOME_HTOKEN,
+            createdAt,
+            dayKey: todayKey(new Date(createdAt)),
+            note: "new account grant",
+          };
+          return {
+            ...daily,
+            welcomeGrantUserId: userId,
+            ftoken: round(s.ftoken + WELCOME_FTOKEN),
+            htoken: round(s.htoken + WELCOME_HTOKEN),
+            todayFGained: round((daily.todayFGained ?? s.todayFGained ?? 0) + WELCOME_FTOKEN),
+            todayHGained: round((daily.todayHGained ?? s.todayHGained ?? 0) + WELCOME_HTOKEN),
+            tokenHistory: [entry, ...(s.tokenHistory ?? [])].slice(0, 1000),
+          };
+        }),
 
       recharge: ({ fSpent, hSpent, minutesGained }) =>
         set((s) => {
@@ -280,6 +320,18 @@ export const useStore = create<Store>()(
                 dayKey: todayKey(new Date(endedAt)),
               }
             : null;
+          const tokenEntry: TokenLedgerEntry | null = record
+            ? {
+                id: `t-${endedAt}-${Math.random().toString(36).slice(2, 6)}`,
+                kind: "pomodoro",
+                fDelta: totalFGain,
+                hDelta: 0,
+                createdAt: endedAt,
+                dayKey: record.dayKey,
+                note: taskName,
+                pomodoroRecordId: record.id,
+              }
+            : null;
           return {
             ...daily,
             session: null,
@@ -290,6 +342,9 @@ export const useStore = create<Store>()(
             pomodoroHistory: record
               ? [record, ...(s.pomodoroHistory ?? [])].slice(0, 500)
               : s.pomodoroHistory ?? [],
+            tokenHistory: tokenEntry
+              ? [tokenEntry, ...(s.tokenHistory ?? [])].slice(0, 1000)
+              : s.tokenHistory ?? [],
             recentTasks,
           };
         }),
@@ -408,7 +463,9 @@ export const useStore = create<Store>()(
         todayFGained: s.todayFGained,
         todayHGained: s.todayHGained,
         todayPoolGained: s.todayPoolGained,
+        welcomeGrantUserId: s.welcomeGrantUserId,
         pomodoroHistory: s.pomodoroHistory,
+        tokenHistory: s.tokenHistory,
         wishlist: s.wishlist,
         achievements: s.achievements,
         kanban: s.kanban,
