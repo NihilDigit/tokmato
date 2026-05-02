@@ -107,7 +107,7 @@ export interface UserState {
   todayFGained: number;
   todayHGained: number;
   todayPoolGained: number;
-  welcomeGrantUserId: string | null;
+  welcomeGrantedUserIds: string[];
 
   // Persistent collections
   pomodoroHistory: PomodoroRecord[];

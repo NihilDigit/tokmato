@@ -17,7 +17,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
 function ProviderInner({ children }: { children: React.ReactNode }) {
   const { data: session, status } = useSession();
   const [storeReady, setStoreReady] = useState(useStore.persist.hasHydrated());
-  const welcomeGrantUserId = useStore((s) => s.welcomeGrantUserId);
+  const welcomeGrantedCount = useStore((s) => s.welcomeGrantedUserIds.length);
 
   // Manually rehydrate the persisted store after mount (paired with
   // `skipHydration: true` in lib/store.ts) — keeps SSR HTML consistent
@@ -43,7 +43,7 @@ function ProviderInner({ children }: { children: React.ReactNode }) {
     const user = session?.user as { id?: string } | undefined;
     if (!user?.id) return;
     useStore.getState().grantWelcomeBonus(user.id);
-  }, [session?.user, status, storeReady, welcomeGrantUserId]);
+  }, [session?.user, status, storeReady, welcomeGrantedCount]);
 
   // Read play session at the root so the timer overlay shows on any tab.
   const playSession = useStore((s) => s.playSession);

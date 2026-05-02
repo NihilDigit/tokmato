@@ -46,7 +46,7 @@ function createStarterState(): UserState {
     todayFGained: 0,
     todayHGained: 0,
     todayPoolGained: 0,
-    welcomeGrantUserId: null,
+    welcomeGrantedUserIds: [],
     pomodoroHistory: [],
     tokenHistory: [],
     wishlist: [],
@@ -199,7 +199,10 @@ export const useStore = create<Store>()(
 
       grantWelcomeBonus: (userId) =>
         set((s) => {
-          if (!userId || s.welcomeGrantUserId === userId) return s;
+          // Per-user idempotency: track every userId that has been granted,
+          // not just the most recent. Otherwise alternating accounts on the
+          // same device farms infinite welcome bonuses.
+          if (!userId || s.welcomeGrantedUserIds.includes(userId)) return s;
           const daily = normalizeDay(s);
           const createdAt = Date.now();
           const entry: TokenLedgerEntry = {
@@ -213,7 +216,7 @@ export const useStore = create<Store>()(
           };
           return {
             ...daily,
-            welcomeGrantUserId: userId,
+            welcomeGrantedUserIds: [...s.welcomeGrantedUserIds, userId],
             ftoken: round(s.ftoken + WELCOME_FTOKEN),
             htoken: round(s.htoken + WELCOME_HTOKEN),
             todayFGained: round((daily.todayFGained ?? s.todayFGained ?? 0) + WELCOME_FTOKEN),
@@ -224,6 +227,10 @@ export const useStore = create<Store>()(
 
       recharge: ({ fSpent, hSpent, minutesGained }) =>
         set((s) => {
+          // Reject when balances can't cover the cost — otherwise the time
+          // pool would credit `minutesGained` even from a zero balance.
+          // Mirrors the redeemWish guard.
+          if (fSpent > s.ftoken || hSpent > s.htoken) return s;
           const daily = normalizeDay(s);
           return {
             ...daily,
@@ -442,7 +449,22 @@ export const useStore = create<Store>()(
     },
     {
       name: "tokmato:state",
-      version: 1,
+      version: 2,
+      // v1 → v2: replace single-slot welcomeGrantUserId with an array so
+      // alternating accounts on the same device can't farm welcome bonuses.
+      migrate: (persistedState, version) => {
+        if (!persistedState || typeof persistedState !== "object") {
+          return persistedState as Partial<UserState>;
+        }
+        const state = persistedState as Record<string, unknown>;
+        if (version < 2) {
+          const legacy = state.welcomeGrantUserId;
+          state.welcomeGrantedUserIds =
+            typeof legacy === "string" && legacy ? [legacy] : [];
+          delete state.welcomeGrantUserId;
+        }
+        return state as Partial<UserState>;
+      },
       // Skip auto-hydrate so SSR and the very first client render both
       // see DEFAULTS — eliminating hydration mismatch. We rehydrate
       // manually inside Providers (useEffect) which is purely a client
@@ -463,7 +485,7 @@ export const useStore = create<Store>()(
         todayFGained: s.todayFGained,
         todayHGained: s.todayHGained,
         todayPoolGained: s.todayPoolGained,
-        welcomeGrantUserId: s.welcomeGrantUserId,
+        welcomeGrantedUserIds: s.welcomeGrantedUserIds,
         pomodoroHistory: s.pomodoroHistory,
         tokenHistory: s.tokenHistory,
         wishlist: s.wishlist,

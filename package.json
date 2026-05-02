@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "test": "bun test",
     "build": "next build",
     "start": "next start"
   },

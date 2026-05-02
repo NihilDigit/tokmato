@@ -39,8 +39,13 @@ There is no test suite yet. Verification is browser-based — run `bun run build
 - **React 19** — Server Components are the default; only mark `"use client"` when a file uses state, effects, event handlers, or browser APIs.
 - **Tailwind v4** — config-less, theme tokens live in `app/globals.css` `@theme inline {}`. No `tailwind.config.*` file exists.
 - **shadcn/ui** ("base-nova" style) on top of Tailwind v4. CLI alias map: `@/components`, `@/lib`, `@/components/ui`. shadcn's semantic tokens (`--background`, `--foreground`, `--primary`, etc.) are **remapped to tokmato's palette** in `globals.css` so any shadcn component renders in our editorial colors automatically.
-- **Auth.js v5 (next-auth@beta)** with GitHub OAuth — config in `auth.ts`, route handler in `app/api/auth/[...nextauth]/route.ts`.
-- **Vercel Marketplace Upstash Redis** for cross-device state sync (env vars `KV_REST_API_URL` / `KV_REST_API_TOKEN`, with `UPSTASH_REDIS_REST_URL/TOKEN` as fallback). Wrapper at `lib/kv.ts`. Currently the app runs against `localStorage` only; KV is provisioned but not yet wired into the store.
+- **Auth.js v5 (next-auth@beta)** with GitHub OAuth — config in `auth.ts`, route handler in `app/api/auth/[...nextauth]/route.ts`. `SessionProvider` wraps the tree in `components/providers.tsx`.
+- **Vercel Marketplace Upstash Redis** for cross-device state sync (env vars `KV_REST_API_URL` / `KV_REST_API_TOKEN`, with `UPSTASH_REDIS_REST_URL/TOKEN` as fallback). Wrapper at `lib/kv.ts`; key namespace via `kvKey.userState(userId)`. The store still treats `localStorage` as the source of truth — cloud sync is **manual save/load**, not auto-merge.
+
+### Auth & cloud sync flow
+- **Server actions** (`app/actions/sync.ts`): `saveToCloud(snapshot)` and `loadFromCloud()` are the only paths to KV. Both gate on `auth()` and throw `UNAUTHENTICATED` if there's no session. There is **no server-side merge** — the user picks the direction in `/settings` (Save / Load buttons).
+- **Welcome bonus**: `providers.tsx` watches `session.user.id` and, once the store is hydrated, calls `grantWelcomeBonus(userId)` exactly once per user (idempotency lives in `welcomeGrantedUserIds` on the persisted state — see `lib/store.ts`). Don't re-grant from any other surface.
+- The persisted snapshot shape is whatever `partialize` exposes in `lib/store.ts`; if you add new state, decide explicitly whether it ships to KV.
 
 ### Design tokens (single source of truth: `app/globals.css`)
 Tokens live as CSS custom properties on `:root` and are exposed to Tailwind via `@theme inline`. The `[data-theme="dark"]` and `.dark` selectors swap the values for warm-dark mode (墨调/深棕, **not** OLED black).
