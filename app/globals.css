@@ -1,0 +1,515 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/* Dark mode applies to both shadcn convention (.dark) and our convention ([data-theme="dark"]). */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *, .dark, .dark *));
+
+/* ─────────────────────────────────────────────────────────────────────────
+   tokmato design tokens — migrated from legacy/styles.css
+   See legacy/TOKEN_MAP.md for the legacy → Tailwind utility cheatsheet.
+   Tokens live as CSS custom properties on :root / [data-theme="dark"].
+   The @theme inline block exposes them as Tailwind utilities (bg-paper,
+   text-ink, border-rule, font-serif, text-display, etc.).
+   ───────────────────────────────────────────────────────────────────────── */
+
+/* CJK serif fallback — system 楷体 only kicks in for CJK chars via unicode-range.
+   Result: English in Instrument Serif (italic ok), Chinese in 楷体 (no fake italic). */
+@font-face {
+  font-family: "CJKKai";
+  src: local("STKaiti"), local("Kaiti SC"), local("KaiTi"), local("楷体"), local("Ma Shan Zheng");
+  unicode-range: U+3000-9FFF, U+FF00-FFEF;
+}
+
+:root {
+  /* Palette — warm editorial */
+  --paper: #f4efe6;
+  --paper-2: #eae3d5;
+  --paper-3: #ddd4c2;
+  --ink: #1a1614;
+  --ink-2: #3a332d;
+  --ink-3: #6b6258;
+  --ink-mute: #9a9085;
+  --rule: rgba(26, 22, 20, 0.12);
+  --rule-2: rgba(26, 22, 20, 0.06);
+
+  /* Accents */
+  --tomato: #e14a2b;
+  --tomato-deep: #b83a20;
+  --tomato-soft: #f4d8cf;
+  --sage: #6f8265;
+  --sage-deep: #4f5f47;
+  --sage-soft: #d4dbca;
+  --gold: #c8943a;
+  --gold-soft: #ebddb8;
+  --teal: #4a8b8c;
+  --teal-deep: #335c5d;
+  --teal-soft: #c9dddd;
+  --plum: #7b4a6a;
+
+  /* Type families */
+  --font-serif: "CJKKai", var(--font-instrument-serif), "Iowan Old Style", Georgia, serif;
+  --font-kaiti: "CJKKai", "STKaiti", "楷体", "KaiTi", "Kaiti SC", var(--font-instrument-serif), Georgia, serif;
+  --font-sans: var(--font-inter-tight), system-ui, -apple-system, "PingFang SC", "Helvetica Neue", sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, monospace;
+
+  /* Shadows */
+  --shadow-soft: 0 1px 2px rgba(26, 22, 20, 0.04), 0 8px 24px rgba(26, 22, 20, 0.06);
+  --shadow-lift: 0 2px 4px rgba(26, 22, 20, 0.06), 0 24px 48px rgba(26, 22, 20, 0.12);
+
+  /* Layout — fluid */
+  --bp-mobile: 768px;
+  --page-max: 1180px;
+  --page-pad-x: clamp(16px, 4vw, 48px);
+  --page-pad-y: clamp(20px, 4vw, 32px);
+  --page-pad-bottom: clamp(80px, 12vh, 120px);
+  --mobile-nav-h: 64px;
+
+  /* Safe area insets — iOS notch / Android nav */
+  --safe-t: env(safe-area-inset-top, 0px);
+  --safe-r: env(safe-area-inset-right, 0px);
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-l: env(safe-area-inset-left, 0px);
+
+  /* Fluid type clamp scale */
+  --fs-display: clamp(48px, 10vw, 88px);
+  --fs-h1: clamp(36px, 7vw, 56px);
+  --fs-h2: clamp(28px, 4.5vw, 38px);
+  --fs-h3: clamp(22px, 3vw, 32px);
+  --fs-stat: clamp(36px, 6vw, 56px);
+  --fs-balance: clamp(32px, 5vw, 44px);
+  /* shadcn semantic tokens — remapped to tokmato editorial palette */
+  --background: var(--paper);
+  --foreground: var(--ink);
+  --card: var(--paper);
+  --card-foreground: var(--ink);
+  --popover: var(--paper);
+  --popover-foreground: var(--ink);
+  --primary: var(--ink);
+  --primary-foreground: var(--paper);
+  --secondary: var(--paper-2);
+  --secondary-foreground: var(--ink-2);
+  --muted: var(--paper-2);
+  --muted-foreground: var(--ink-3);
+  --accent: var(--tomato);
+  --accent-foreground: #ffffff;
+  --destructive: var(--plum);
+  --border: var(--rule);
+  --input: var(--rule);
+  --ring: var(--tomato);
+  --chart-1: var(--tomato);
+  --chart-2: var(--sage);
+  --chart-3: var(--teal);
+  --chart-4: var(--gold);
+  --chart-5: var(--plum);
+  --radius: 0.625rem;
+  --sidebar: var(--paper-2);
+  --sidebar-foreground: var(--ink);
+  --sidebar-primary: var(--ink);
+  --sidebar-primary-foreground: var(--paper);
+  --sidebar-accent: var(--paper-3);
+  --sidebar-accent-foreground: var(--ink);
+  --sidebar-border: var(--rule);
+  --sidebar-ring: var(--tomato);
+}
+
+/* Warm dark — 墨调/深棕, not OLED black. Accents lifted +10% for AA contrast. */
+[data-theme="dark"] {
+  --paper: #1a1614;
+  --paper-2: #221c18;
+  --paper-3: #2c2520;
+  --ink: #f4efe6;
+  --ink-2: #d8d2c5;
+  --ink-3: #a89f93;
+  --ink-mute: #6b6258;
+  --rule: rgba(244, 239, 230, 0.14);
+  --rule-2: rgba(244, 239, 230, 0.07);
+
+  --tomato: #ff6a4a;
+  --tomato-deep: #ff8a72;
+  --tomato-soft: #4a2519;
+  --sage: #9bb091;
+  --sage-deep: #b6c9ad;
+  --sage-soft: #2d3a28;
+  --gold: #e0b860;
+  --gold-soft: #423718;
+  --teal: #6fb1b1;
+  --teal-deep: #92cccd;
+  --teal-soft: #1f3637;
+  --plum: #b88ba9;
+
+  --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.4);
+  --shadow-lift: 0 2px 4px rgba(0, 0, 0, 0.4), 0 24px 48px rgba(0, 0, 0, 0.5);
+}
+
+/* Auto-follow OS preference unless data-theme explicitly set */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #1a1614;
+    --paper-2: #221c18;
+    --paper-3: #2c2520;
+    --ink: #f4efe6;
+    --ink-2: #d8d2c5;
+    --ink-3: #a89f93;
+    --ink-mute: #6b6258;
+    --rule: rgba(244, 239, 230, 0.14);
+    --rule-2: rgba(244, 239, 230, 0.07);
+    --tomato: #ff6a4a;
+    --tomato-deep: #ff8a72;
+    --tomato-soft: #4a2519;
+    --sage: #9bb091;
+    --sage-deep: #b6c9ad;
+    --sage-soft: #2d3a28;
+    --gold: #e0b860;
+    --gold-soft: #423718;
+    --teal: #6fb1b1;
+    --teal-deep: #92cccd;
+    --teal-soft: #1f3637;
+    --plum: #b88ba9;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Tailwind theme — exposes tokens as utilities (bg-paper, text-ink, etc.)
+   ───────────────────────────────────────────────────────────────────────── */
+@theme inline {
+  --color-paper: var(--paper);
+  --color-paper-2: var(--paper-2);
+  --color-paper-3: var(--paper-3);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-ink-mute: var(--ink-mute);
+  --color-rule: var(--rule);
+  --color-rule-2: var(--rule-2);
+  --color-tomato: var(--tomato);
+  --color-tomato-deep: var(--tomato-deep);
+  --color-tomato-soft: var(--tomato-soft);
+  --color-sage: var(--sage);
+  --color-sage-deep: var(--sage-deep);
+  --color-sage-soft: var(--sage-soft);
+  --color-gold: var(--gold);
+  --color-gold-soft: var(--gold-soft);
+  --color-teal: var(--teal);
+  --color-teal-deep: var(--teal-deep);
+  --color-teal-soft: var(--teal-soft);
+  --color-plum: var(--plum);
+
+  --font-serif: var(--font-serif);
+  --font-kaiti: var(--font-kaiti);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+
+  --text-display: var(--fs-display);
+  --text-display--line-height: 1.05;
+  --text-h1: var(--fs-h1);
+  --text-h1--line-height: 1.1;
+  --text-h2: var(--fs-h2);
+  --text-h2--line-height: 1.15;
+  --text-h3: var(--fs-h3);
+  --text-h3--line-height: 1.25;
+  --text-stat: var(--fs-stat);
+  --text-stat--line-height: 1;
+  --text-balance-num: var(--fs-balance);
+  --text-balance-num--line-height: 1;
+
+  --shadow-soft: var(--shadow-soft);
+  --shadow-lift: var(--shadow-lift);
+  --font-heading: var(--font-sans);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Base reset
+   ───────────────────────────────────────────────────────────────────────── */
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+html {
+  background: var(--paper);
+  color: var(--ink);
+  /* Smooth flip when toggling theme */
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+body {
+  font-family: var(--font-sans);
+  background: var(--paper);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+  letter-spacing: -0.005em;
+  /* Never fake italic/bold — Chinese 楷体 stays 楷体 */
+  font-synthesis: none;
+}
+
+/* Button cursor only — Tailwind preflight handles padding/border/font/margin reset.
+   We do NOT add padding:0 here because that would override Tailwind utilities
+   like px-4 (Lightning CSS strips user @layer wrappers, so unlayered button{}
+   beats utility classes — see preflight's `* { padding: 0 }` which is what we
+   want to rely on). */
+button {
+  cursor: pointer;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Utility classes — kept from legacy (Tailwind can't easily replicate)
+   ───────────────────────────────────────────────────────────────────────── */
+.smallcaps {
+  font-family: var(--font-sans);
+  text-transform: uppercase;
+  letter-spacing: 0.11em;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink-3);
+  line-height: 1.4;
+}
+
+/* "italic" in this design = 楷体 衬线, not slanted — Chinese has no italic */
+.serif {
+  font-family: var(--font-serif);
+  font-weight: 400;
+  letter-spacing: -0.01em;
+}
+.serif.italic,
+.italic.serif {
+  line-height: 1.25;
+}
+.italic {
+  font-family: var(--font-kaiti);
+  font-style: normal;
+  letter-spacing: 0;
+  line-height: 1.25;
+}
+.serif.italic {
+  font-family: var(--font-kaiti);
+  font-style: normal;
+}
+.mono {
+  font-family: var(--font-mono);
+  font-feature-settings: "tnum";
+}
+
+.hairline {
+  height: 1px;
+  background: var(--rule);
+  width: 100%;
+}
+
+/* Page shell — every route wraps content in this */
+.page-shell {
+  max-width: var(--page-max);
+  margin: 0 auto;
+  width: 100%;
+  padding: var(--page-pad-y) var(--page-pad-x) var(--page-pad-bottom);
+  padding-top: max(var(--page-pad-y), var(--safe-t));
+  padding-left: max(var(--page-pad-x), var(--safe-l));
+  padding-right: max(var(--page-pad-x), var(--safe-r));
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Animations — preserved from legacy
+   ───────────────────────────────────────────────────────────────────────── */
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+@keyframes pulseSoft {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+@keyframes risefloat {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, 20px) scale(0.7);
+  }
+  20% {
+    opacity: 1;
+    transform: translate(-50%, -20px) scale(1.1);
+  }
+  60% {
+    opacity: 1;
+    transform: translate(-50%, -60px) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -120px) scale(0.9);
+  }
+}
+@keyframes bottomSheetIn {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+.fade-up {
+  animation: fadeUp 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.fade-in {
+  animation: fadeIn 0.4s ease both;
+}
+.scale-in {
+  animation: scaleIn 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Mobile breakpoint helpers */
+@media (max-width: 768px) {
+  .page-shell {
+    padding-bottom: calc(var(--mobile-nav-h) + var(--safe-b) + 24px);
+  }
+  .desktop-only-nav {
+    display: none !important;
+  }
+}
+
+/* When a sheet/dialog is open, hide the mobile tab bar so it doesn't
+   peek through under the bottom-sheet edge. ResponsiveSheet sets
+   data-sheet-open on body during its open lifetime. */
+body[data-sheet-open] .mobile-tabbar {
+  display: none !important;
+}
+
+/* Hide native scrollbars while keeping scroll behavior. Used by the
+   mobile Kanban segmented-tab strip and other horizontal scroll rows. */
+.no-scrollbar {
+  -ms-overflow-style: none; /* IE/Edge */
+  scrollbar-width: none;     /* Firefox */
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;             /* Webkit */
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--ink-mute);
+  opacity: 0.3;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Dark mode shadcn token override — paper/ink/accent already swap via [data-theme="dark"] block above.
+   Here we just realias the shadcn semantic names so .dark class users (e.g. shadcn examples in docs)
+   see the same warm dark palette. */
+.dark {
+  --paper: #1a1614;
+  --paper-2: #221c18;
+  --paper-3: #2c2520;
+  --ink: #f4efe6;
+  --ink-2: #d8d2c5;
+  --ink-3: #a89f93;
+  --ink-mute: #6b6258;
+  --rule: rgba(244, 239, 230, 0.14);
+  --rule-2: rgba(244, 239, 230, 0.07);
+  --tomato: #ff6a4a;
+  --tomato-deep: #ff8a72;
+  --tomato-soft: #4a2519;
+  --sage: #9bb091;
+  --sage-deep: #b6c9ad;
+  --sage-soft: #2d3a28;
+  --gold: #e0b860;
+  --gold-soft: #423718;
+  --teal: #6fb1b1;
+  --teal-deep: #92cccd;
+  --teal-soft: #1f3637;
+  --plum: #b88ba9;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
+  }
+}
