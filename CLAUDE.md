@@ -134,7 +134,7 @@ Example reference: `app/journey/page.tsx` `BalanceCell`.
 
 `todayKey()` in `lib/store.ts` returns the current "tokmato day" — UTC+8 with a **4am cutoff** (so a late-night user can still settle the day they just finished). Use this for any "is today" comparison, never `new Date().toLocaleDateString()`.
 
-The persist version is at `4` — bumping it requires a `migrate` function that handles every prior shape. v1→v2 was `welcomeGrantUserId` → `welcomeGrantedUserIds[]`; v2→v3 added `session.phaseStartedAt`; v3→v4 added `lastSavedAt` for auto-sync LWW arbitration (defaults to `0` = "never synced").
+The persist version is at `8` — bumping it requires a `migrate` function that handles every prior shape. v1→v2 was `welcomeGrantUserId` → `welcomeGrantedUserIds[]`; v2→v3 added `session.phaseStartedAt`; v3→v4 added `lastSavedAt` for auto-sync LWW arbitration (defaults to `0` = "never synced"); v4→v5 added the now-retired `guideSeenUserIds`; v5→v6 retired `guideSeenUserIds` in favor of a `tokmato:guide-seen` localStorage flag; v6→v7 generalized `todayMathPomos` → `todayCountsByTag` and seeded `tags` + `bonuses` defaults; **v7→v8 was a destructive wipe**: returns `createStarterState()` and clears the per-browser flags (`tokmato:guide-seen`, `tokmato:welcome-granted`), then drops `tokmato:v8-just-upgraded` so a post-hydrate effect in `providers.tsx` can call `cancelPushChain()` + `clearActiveSession()` (otherwise a mid-pomodoro upgrade would orphan the QStash chain and the cross-device active marker).
 
 `selectSnapshot(state)` (exported from `lib/store.ts`) is the single projection used by both `partialize` (localStorage) and `saveToCloud` (KV). Don't roll your own subset — every persisted-shape reader should go through this.
 
@@ -164,6 +164,8 @@ The persist version is at `4` — bumping it requires a `migrate` function that 
 
 - **No raw hex / oklch / rgba in component code** — always go through a CSS variable in `globals.css`. Even one-off colors (gradients, SVG fills) get a token.
 - **No marketing副文** (per `.impeccable.md` principle 1 "诚实大于优雅"). Every line of UI text must be either functional info or named action. Examples of what gets cut: dot-separated AI-style taglines, explainer subtitles under section titles, redundant bilingual labels (e.g. "Settings / 设置" together — pick one).
+- **Section head = kicker XOR title**, not both unless the kicker is a real category (temporal scope / axis label) not a paraphrase. 反例：kicker `30 天账本` + title `花到哪了`（两层同义，删 title）。可接受：kicker `30 天` + title `账本`（前者是范围，后者是功能名）。
+- **`·` is punctuation, not decoration** — middle dot separates equivalent inline items (`F · H · 时间池` / `保存 · 取消`). 永不用来粘连"概念 · 解释"。反例：`账本 · 含进项与消费`、`番茄换娱乐时间 · 约束消遣`、`先看这一页 · 之后从设置可再次打开`。第二段若是第一段的注释、扩写或同义重述，删第二段。
 - **Daily hero size is `text-h2` max**. `text-display` (clamp 48-88) is reserved for once-a-year emotional peaks (year-end review, settlement celebration). Home / Redeem hero never use it.
 - **Above-the-fold density**: each route's first viewport must surface ≥3 independent functional chunks (card / strip / row). No giant centered headline that owns the whole screen.
 - **CJK italic = 楷体, never browser-faked oblique**. `font-synthesis: none` is set globally; the `font-serif` stack puts CJKKai (with `unicode-range: U+3000-9FFF`) in front of Instrument Serif so Latin text gets real italic and Chinese gets 楷体.
