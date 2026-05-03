@@ -130,7 +130,11 @@ describe("rolledUpEntries", () => {
     expect(twice).toEqual(once);
   });
 
-  it("folds an existing rollup back into a fresh rollup if more old entries surface", () => {
+  it("treats an existing rollup as authoritative and drops raw entries for that day", () => {
+    // Cross-device safety: device A had this day rolled up, device B
+    // still had raw entries. After id-dedup merge, both arrive here. We
+    // must NOT re-fold the raw entries with the rollup — their deltas
+    // are already inside the rollup's sum (would double-count).
     const existingRollup: TokenLedgerEntry = {
       id: rollupIdFor("2026-04-01"),
       kind: "rollup",
@@ -139,12 +143,13 @@ describe("rolledUpEntries", () => {
       createdAt: 10,
       dayKey: "2026-04-01",
     };
-    const newOld = old(25, 2, 1, "2026-04-01");
-    const r = rolledUpEntries([existingRollup, newOld], cutoff);
+    const rawDup = old(25, 2, 1, "2026-04-01");
+    const r = rolledUpEntries([existingRollup, rawDup], cutoff);
     const rollups = r.filter((e) => e.kind === "rollup");
     expect(rollups).toHaveLength(1);
-    expect(rollups[0].fDelta).toBe(3.5);
-    expect(rollups[0].hDelta).toBe(1);
+    expect(rollups[0].fDelta).toBe(1.5); // unchanged from existing
+    expect(rollups[0].hDelta).toBe(0);
+    expect(r.find((e) => e.id === rawDup.id)).toBeUndefined();
   });
 
   it("omits minutesDelta when summed minutes are zero", () => {

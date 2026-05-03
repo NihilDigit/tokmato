@@ -297,17 +297,23 @@ export const useStore = create<Store>()(
           const { entries: tokenHistory, fAdjust, hAdjust } =
             dedupWelcomeEntries(tokenHistoryRaw);
           // Balance reconciliation:
-          //   cloud baseline (cloud has its own ledger + accumulated balance)
-          // + local-only entries (in local ledger but NOT in cloud ledger,
-          //   identified by id-set difference — these are local contributions
-          //   the cloud snapshot doesn't know about)
+          //   cloud baseline (cloud has its own ledger + accumulated balance,
+          //   including any rolled-up / truncated entries no longer visible
+          //   in cloud.tokenHistory)
+          // + local entries created AFTER local.lastSavedAt (= contributions
+          //   this device made since the last sync — anything older was
+          //   already accounted for in cloud's baseline by definition)
           // + welcome dedup adjustment (negate dropped duplicate welcomes).
-          const cloudIds = new Set(cloudHistory.map((e) => e.id));
-          const localOnly = local.tokenHistory.filter((e) => !cloudIds.has(e.id));
+          //
+          // Time-based filter is safer than id-set difference: if cloud
+          // rolled up old entries, an id-set filter would re-credit them.
+          const localNew = local.tokenHistory.filter(
+            (e) => e.createdAt > local.lastSavedAt,
+          );
           let fNew = 0;
           let hNew = 0;
           let mNew = 0;
-          for (const e of localOnly) {
+          for (const e of localNew) {
             fNew += e.fDelta;
             hNew += e.hDelta;
             if (typeof e.minutesDelta === "number") mNew += e.minutesDelta;
@@ -316,15 +322,54 @@ export const useStore = create<Store>()(
           const htoken = round((cloud.htoken ?? 0) + hNew + hAdjust);
           const timePool = clamp((cloud.timePool ?? 0) + mNew);
           const cloudKanban = cloud.kanban ?? local.kanban;
+          // Recompute today's per-axis / per-tag counters from the merged
+          // pomodoro + ledger history rather than trusting cloud's snapshot
+          // values. Cloud's snapshot may have been taken before some local
+          // pomos/spending today; cloud-wins on these counters would lose
+          // that activity from the UI even though the underlying ledger
+          // and pomodoroHistory contain it.
+          const today = todayKey();
+          const mergedPomoHistory = dedupBy(
+            local.pomodoroHistory,
+            (cloud.pomodoroHistory ?? []) as typeof local.pomodoroHistory,
+          );
+          const todaysPomos = mergedPomoHistory.filter((p) => p.dayKey === today);
+          const todaysLedger = tokenHistory.filter((e) => e.dayKey === today);
+          let dayPomos = 0;
+          const dayCountsByTag: Record<string, number> = {};
+          for (const p of todaysPomos) {
+            dayPomos += p.count;
+            dayCountsByTag[p.tag] = (dayCountsByTag[p.tag] ?? 0) + p.count;
+          }
+          let dayF = 0;
+          let dayH = 0;
+          let dayPool = 0;
+          for (const e of todaysLedger) {
+            if (e.fDelta > 0) dayF += e.fDelta;
+            if (e.hDelta > 0) dayH += e.hDelta;
+            if (typeof e.minutesDelta === "number" && e.minutesDelta > 0) {
+              dayPool += e.minutesDelta;
+            }
+          }
+          // v8-just-upgraded marker: a mid-pomodoro upgrade had its local
+          // session wiped + its server-side QStash chain + active marker
+          // cleaned up by the post-hydrate effect. Don't restore the
+          // session from cloud on this merge — there's nothing on the
+          // server backing it anymore.
+          let restoreSession = true;
+          if (typeof window !== "undefined") {
+            try {
+              if (window.localStorage.getItem("tokmato:v8-just-upgraded")) {
+                restoreSession = false;
+              }
+            } catch {}
+          }
           return {
             ftoken,
             htoken,
             timePool,
             tokenHistory: tokenHistory.slice(0, 1000),
-            pomodoroHistory: dedupBy(
-              local.pomodoroHistory,
-              (cloud.pomodoroHistory ?? []) as typeof local.pomodoroHistory,
-            ).slice(0, 500),
+            pomodoroHistory: mergedPomoHistory.slice(0, 500),
             wishlist: dedupBy(local.wishlist, cloud.wishlist ?? []),
             achievements: dedupBy(local.achievements, cloud.achievements ?? []),
             foodPresets: dedupBy(local.foodPresets, cloud.foodPresets ?? []),
@@ -340,18 +385,15 @@ export const useStore = create<Store>()(
             recentTasks: Array.from(
               new Set([...local.recentTasks, ...(cloud.recentTasks ?? [])]),
             ).slice(0, 5),
-            // Cloud wins for in-flight session + day metadata. The
-            // cross-device awareness layer prevents two simultaneous
-            // sessions, so a non-null cloud session reflects the truth.
-            session: cloud.session ?? null,
-            playSession: cloud.playSession ?? null,
-            activeDay: cloud.activeDay ?? local.activeDay,
+            session: restoreSession ? (cloud.session ?? null) : null,
+            playSession: restoreSession ? (cloud.playSession ?? null) : null,
+            activeDay: today,
             lastSettledDate: cloud.lastSettledDate ?? local.lastSettledDate,
-            todayPomos: cloud.todayPomos ?? 0,
-            todayCountsByTag: cloud.todayCountsByTag ?? {},
-            todayFGained: cloud.todayFGained ?? 0,
-            todayHGained: cloud.todayHGained ?? 0,
-            todayPoolGained: cloud.todayPoolGained ?? 0,
+            todayPomos: dayPomos,
+            todayCountsByTag: dayCountsByTag,
+            todayFGained: round(dayF),
+            todayHGained: round(dayH),
+            todayPoolGained: round(dayPool, 0),
             lastSavedAt: savedAt,
           };
         }),

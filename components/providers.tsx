@@ -62,17 +62,37 @@ function ProviderInner({ children }: { children: React.ReactNode }) {
   // before login. Cloud-side dedup is handled at merge time by
   // `dedupWelcomeEntries` in lib/ledger.ts (collapses anon + cloud
   // welcomes into a single entry).
+  //
+  // Re-runs when `status` changes so an authenticated grant gets a
+  // direct saveToCloud follow-up: the autosave subscription captures
+  // the post-grant state as its baseline and would otherwise miss the
+  // welcome on a "first browser auth, no other balance change before
+  // close" path.
   useEffect(() => {
     if (!storeReady) return;
     if (typeof window === "undefined") return;
+    let granted = false;
     try {
-      if (window.localStorage.getItem("tokmato:welcome-granted")) return;
-      window.localStorage.setItem("tokmato:welcome-granted", "1");
+      if (!window.localStorage.getItem("tokmato:welcome-granted")) {
+        window.localStorage.setItem("tokmato:welcome-granted", "1");
+        useStore.getState().grantWelcomeBonus();
+        granted = true;
+      }
     } catch {
       return;
     }
-    useStore.getState().grantWelcomeBonus();
-  }, [storeReady]);
+    if (granted && status === "authenticated") {
+      void (async () => {
+        try {
+          const snap = selectSnapshot(useStore.getState());
+          const res = await saveToCloud(snap);
+          useStore.getState().markSynced(res.savedAt);
+        } catch {
+          // Best-effort — autosave will catch up on the next mutation.
+        }
+      })();
+    }
+  }, [storeReady, status]);
 
   // First-run guide — same per-browser flag pattern, separate key.
   useEffect(() => {
@@ -137,18 +157,25 @@ function ProviderInner({ children }: { children: React.ReactNode }) {
         // Rollup runs AFTER merge so the source-of-truth for >30d
         // entries is the deduped union of both sides.
         useStore.getState().runRollup();
-        // Drift check — purely diagnostic for v9.
+        // Drift check — purely diagnostic for v9. Covers all three
+        // axes (F / H / time pool) so a regression on any of the new
+        // ledger writes surfaces.
         const after = useStore.getState();
         const recomputed = recomputeBalances(after.tokenHistory);
         if (
           Math.abs(recomputed.ftoken - after.ftoken) > 0.05 ||
-          Math.abs(recomputed.htoken - after.htoken) > 0.05
+          Math.abs(recomputed.htoken - after.htoken) > 0.05 ||
+          Math.abs(recomputed.timePool - after.timePool) > 0.5
         ) {
           // eslint-disable-next-line no-console
-          console.warn(
-            "[sync] balance drift after merge",
-            { stored: { f: after.ftoken, h: after.htoken }, recomputed },
-          );
+          console.warn("[sync] balance drift after merge", {
+            stored: {
+              f: after.ftoken,
+              h: after.htoken,
+              pool: after.timePool,
+            },
+            recomputed,
+          });
         }
       } catch {
         // Network/auth flap — leave local untouched. The user can hit

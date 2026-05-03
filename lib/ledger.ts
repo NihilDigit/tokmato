@@ -74,17 +74,33 @@ export function rollupIdFor(dayKey: string): string {
 }
 
 /** Collapse entries with `createdAt < cutoffMs` into one rollup per
- *  dayKey. Younger entries pass through untouched. Idempotent: existing
- *  rollups in the input get folded into the recomputed rollups
- *  (their deltas re-summed). */
+ *  dayKey. Younger entries pass through untouched. Idempotent.
+ *
+ *  Cross-device safety: if a `kind:"rollup"` entry already exists for
+ *  a dayKey, it is treated as the authoritative summary — any raw
+ *  entries for that day get DROPPED rather than re-folded with the
+ *  rollup. This prevents a double-count when one device's rolled-up
+ *  view merges with another device's still-raw view of the same day.
+ */
 export function rolledUpEntries(
   entries: TokenLedgerEntry[],
   cutoffMs: number,
 ): TokenLedgerEntry[] {
   const young: TokenLedgerEntry[] = [];
   const oldByDay = new Map<string, TokenLedgerEntry[]>();
+  // Days that already have a rollup somewhere in the input — raw
+  // entries for these days are duplicates of the rollup's summed
+  // contribution and must not be folded again.
+  const daysWithExistingRollup = new Set<string>();
   for (const e of entries) {
-    if (e.createdAt < cutoffMs) {
+    if (e.kind === "rollup") {
+      daysWithExistingRollup.add(e.dayKey);
+    }
+  }
+  for (const e of entries) {
+    const isOld = e.createdAt < cutoffMs;
+    const isRollup = e.kind === "rollup";
+    if (isOld || isRollup) {
       const arr = oldByDay.get(e.dayKey) ?? [];
       arr.push(e);
       oldByDay.set(e.dayKey, arr);
@@ -95,6 +111,16 @@ export function rolledUpEntries(
   if (oldByDay.size === 0) return entries;
   const rollups: TokenLedgerEntry[] = [];
   for (const [dayKey, dayEntries] of oldByDay) {
+    if (daysWithExistingRollup.has(dayKey)) {
+      // Use the existing rollup as-is. Raw entries for the same day
+      // are dropped (they're already summed inside the rollup from a
+      // prior device's runRollup pass).
+      const existing = dayEntries
+        .filter((e) => e.kind === "rollup")
+        .sort((a, b) => b.createdAt - a.createdAt)[0];
+      rollups.push(existing);
+      continue;
+    }
     let f = 0;
     let h = 0;
     let m = 0;

@@ -822,7 +822,7 @@ describe("applyMergedSnapshot", () => {
     };
   }
 
-  it("balance = cloud baseline + local entries created after cloud.savedAt", () => {
+  it("balance = cloud baseline + local entries created after local.lastSavedAt", () => {
     // Local: lastSavedAt=1000, two ledger entries created after that.
     useStore.setState({
       ftoken: 8,
@@ -852,6 +852,39 @@ describe("applyMergedSnapshot", () => {
     expect(s().htoken).toBe(5);
     expect(s().timePool).toBe(30);
     expect(s().lastSavedAt).toBe(2000);
+  });
+
+  it("does NOT re-credit local entries that cloud rolled up out of view (time-filter, not id-filter)", () => {
+    // Scenario: cloud rolled up old entries beyond its history horizon.
+    // cloud.tokenHistory no longer contains them; cloud.ftoken DOES
+    // include them via the rollup. Local still has the raw entries
+    // because it hasn't run rollup yet. The merge must NOT add their
+    // deltas a second time on top of cloud.ftoken.
+    useStore.setState({
+      lastSavedAt: 5000,
+      ftoken: 10,
+      tokenHistory: [
+        // Old local entry, already accounted for in cloud's accumulated
+        // baseline (cloud rolled it up + the rollup may itself live in
+        // cloud.tokenHistory, but the raw entry doesn't).
+        ledgerEntry({
+          id: "p-old-rolled",
+          kind: "pomodoro",
+          fDelta: 4,
+          createdAt: 1000,
+        }),
+      ],
+    });
+    s().applyMergedSnapshot(
+      {
+        ftoken: 10,
+        tokenHistory: [], // cloud's view doesn't surface the old entry
+      },
+      6000,
+    );
+    // Old local entry's createdAt (1000) is NOT > local.lastSavedAt (5000),
+    // so it doesn't contribute. Result: cloud baseline preserved.
+    expect(s().ftoken).toBe(10);
   });
 
   it("id-dedups tokenHistory union; cloud entry wins on collision", () => {
