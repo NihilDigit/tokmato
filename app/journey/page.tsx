@@ -1,11 +1,18 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Download } from "lucide-react";
+import { ChevronDown, ChevronRight, Download } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { todayKey, useStore } from "@/lib/store";
+import { todayKey, yesterdayKey, useStore } from "@/lib/store";
 import { TAG_BG_CLASSES, TAG_CHIP_CLASSES } from "@/lib/tag-colors";
-import type { TagColor, TagConfig } from "@/lib/types";
+import type { TagColor, TagConfig, TokenLedgerEntry } from "@/lib/types";
+import {
+  computeDayTotals,
+  formatDayLabel,
+  LedgerDayHeader,
+  LedgerEntryRow,
+} from "@/components/ledger/LedgerRow";
+import { LedgerSheet } from "@/components/sheets/LedgerSheet";
 
 // ─────────────────────────────────────────────────────────────────────────
 // Journey — 年度回顾
@@ -295,7 +302,119 @@ export default function JourneyPage() {
           </div>
         </div>
       </section>
+
+      <LedgerCompactSection />
     </main>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// 账本 — compact 3-day single-open accordion + ScrollableList(4)
+// ─────────────────────────────────────────────────────────────────────────
+
+function LedgerCompactSection() {
+  const tokenHistory = useStore((s) => s.tokenHistory);
+  const tags = useStore((s) => s.tags);
+  const tagsById = useMemo(() => {
+    const m = new Map<string, TagConfig>();
+    for (const t of tags) m.set(t.id, t);
+    return m;
+  }, [tags]);
+
+  // Most recent 3 days that have any non-rollup activity.
+  const recentDays = useMemo(() => {
+    const byDay = new Map<string, TokenLedgerEntry[]>();
+    for (const e of tokenHistory) {
+      if (e.kind === "rollup") continue;
+      const arr = byDay.get(e.dayKey) ?? [];
+      arr.push(e);
+      byDay.set(e.dayKey, arr);
+    }
+    return Array.from(byDay.entries())
+      .sort((a, b) => (a[0] < b[0] ? 1 : -1))
+      .slice(0, 3)
+      .map(([dayKey, entries]) => ({ dayKey, entries }));
+  }, [tokenHistory]);
+
+  const today = todayKey();
+  const yesterday = yesterdayKey();
+  const defaultExpand = recentDays[0]?.dayKey ?? null;
+  const [expandedDayKey, setExpandedDayKey] = useState<string | null>(null);
+  const effectiveExpand = expandedDayKey ?? defaultExpand;
+  const [sheetOpen, setSheetOpen] = useState(false);
+
+  if (recentDays.length === 0) {
+    // No content yet — hide the section entirely.
+    return null;
+  }
+
+  return (
+    <section className="flex flex-col gap-3">
+      <SectionHead kicker="最近 3 天" title="账本" />
+
+      <div
+        className="rounded-xl border border-rule bg-paper overflow-hidden"
+        style={{ height: "320px" }}
+      >
+        <div className="flex flex-col h-full">
+          {recentDays.map(({ dayKey, entries }, idx) => {
+            const totals = computeDayTotals(entries);
+            const isOpen = effectiveExpand === dayKey;
+            return (
+              <div
+                key={dayKey}
+                className={cn(
+                  "flex flex-col",
+                  idx > 0 && "border-t border-rule",
+                  isOpen && "flex-1 min-h-0",
+                )}
+              >
+                <button
+                  type="button"
+                  onClick={() =>
+                    setExpandedDayKey(
+                      expandedDayKey === dayKey ? defaultExpand : dayKey,
+                    )
+                  }
+                  className="text-left transition-colors hover:bg-paper-2/60"
+                >
+                  <LedgerDayHeader
+                    label={formatDayLabel(dayKey, today, yesterday)}
+                    totals={totals}
+                    trailing={
+                      isOpen ? (
+                        <ChevronDown size={14} className="text-ink-3 ml-2" />
+                      ) : (
+                        <ChevronRight size={14} className="text-ink-3 ml-2" />
+                      )
+                    }
+                  />
+                </button>
+                {isOpen && (
+                  <div className="border-t border-rule overflow-y-auto flex-1 min-h-0">
+                    {entries.map((e) => (
+                      <LedgerEntryRow key={e.id} entry={e} tagsById={tagsById} />
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={() => setSheetOpen(true)}
+          className="text-[13px] text-ink-3 hover:text-ink transition-colors"
+        >
+          完整账本 →
+        </button>
+      </div>
+
+      <LedgerSheet open={sheetOpen} onOpenChange={setSheetOpen} />
+    </section>
   );
 }
 
