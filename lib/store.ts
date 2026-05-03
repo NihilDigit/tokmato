@@ -47,6 +47,7 @@ function createStarterState(): UserState {
     todayHGained: 0,
     todayPoolGained: 0,
     welcomeGrantedUserIds: [],
+    guideSeenUserIds: [],
     lastSavedAt: 0,
     pomodoroHistory: [],
     tokenHistory: [],
@@ -88,6 +89,13 @@ export function todayKey(now: Date = new Date()): string {
   return `${yyyy}-${mm}-${dd}`;
 }
 
+/** "Yesterday" relative to wall clock — the same UTC+8/4am-cutoff bucket
+ *  that contained 24h ago. Used by SettleSheet to surface the day being
+ *  reviewed (the dominant entry point is "morning after" wake-up). */
+export function yesterdayKey(now: Date = new Date()): string {
+  return todayKey(new Date(now.getTime() - 24 * 3600 * 1000));
+}
+
 const round = (n: number, p = 1) => Math.round(n * 10 ** p) / 10 ** p;
 const clamp = (v: number, lo = 0, hi = Infinity) => Math.max(lo, Math.min(hi, v));
 
@@ -124,6 +132,9 @@ interface StoreActions {
   settle: (data: { fGained: number; hGained: number }) => void;
   ensureToday: () => void;
   grantWelcomeBonus: (userId: string) => void;
+  /** Mark the welcome guide as seen for this user — idempotent. Called
+   *  from providers.tsx when the user dismisses the WelcomeGuideSheet. */
+  markGuideSeen: (userId: string) => void;
   /** Mark the store as in-sync with a given cloud savedAt. Called from
    *  providers.tsx after a successful save or load. */
   markSynced: (savedAt: number) => void;
@@ -219,6 +230,12 @@ export const useStore = create<Store>()(
 
       applyCloudSnapshot: (snapshot, savedAt) =>
         set(() => ({ ...DEFAULTS, ...snapshot, lastSavedAt: savedAt })),
+
+      markGuideSeen: (userId) =>
+        set((s) => {
+          if (!userId || s.guideSeenUserIds.includes(userId)) return s;
+          return { guideSeenUserIds: [...s.guideSeenUserIds, userId] };
+        }),
 
       grantWelcomeBonus: (userId) =>
         set((s) => {
@@ -519,13 +536,16 @@ export const useStore = create<Store>()(
     },
     {
       name: "tokmato:state",
-      version: 4,
+      version: 5,
       // v1 → v2: replace single-slot welcomeGrantUserId with an array so
       // alternating accounts on the same device can't farm welcome bonuses.
       // v2 → v3: add session.phaseStartedAt for clock-based timer.
       // v3 → v4: add lastSavedAt for auto-sync LWW arbitration. Default 0
       //          means "never synced", forcing the first app-open load to
       //          accept whatever cloud has.
+      // v4 → v5: add guideSeenUserIds. Pre-populate with welcomeGrantedUserIds
+      //          so existing users don't get the first-run guide popped on
+      //          them retroactively — they've already used the app.
       migrate: (persistedState, version) => {
         if (!persistedState || typeof persistedState !== "object") {
           return persistedState as Partial<UserState>;
@@ -547,6 +567,10 @@ export const useStore = create<Store>()(
         }
         if (version < 4) {
           if (typeof state.lastSavedAt !== "number") state.lastSavedAt = 0;
+        }
+        if (version < 5) {
+          const granted = state.welcomeGrantedUserIds;
+          state.guideSeenUserIds = Array.isArray(granted) ? [...granted] : [];
         }
         return state as Partial<UserState>;
       },
@@ -583,6 +607,7 @@ export function selectSnapshot(s: UserState): Partial<UserState> {
     todayHGained: s.todayHGained,
     todayPoolGained: s.todayPoolGained,
     welcomeGrantedUserIds: s.welcomeGrantedUserIds,
+    guideSeenUserIds: s.guideSeenUserIds,
     lastSavedAt: s.lastSavedAt,
     pomodoroHistory: s.pomodoroHistory,
     tokenHistory: s.tokenHistory,

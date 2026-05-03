@@ -28,6 +28,7 @@ function validSnapshot() {
     todayHGained: 0,
     todayPoolGained: 0,
     welcomeGrantedUserIds: [],
+    guideSeenUserIds: [],
     lastSavedAt: 0,
     pomodoroHistory: [],
     tokenHistory: [],

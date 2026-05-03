@@ -15,11 +15,13 @@ import {
   ExternalLink,
   Bell,
   BellOff,
+  BookOpen,
 } from "lucide-react";
 import { useSession, signIn, signOut } from "next-auth/react";
 import { useTheme } from "@/components/theme-provider";
 import { selectSnapshot, useStore } from "@/lib/store";
 import { saveToCloud, loadFromCloud } from "@/app/actions/sync";
+import { WelcomeGuideSheet } from "@/components/sheets/WelcomeGuideSheet";
 import {
   isPushSupported,
   getPermission,
@@ -64,6 +66,7 @@ export default function SettingsPage() {
 
   const [syncStatus, setSyncStatus] = useState<SyncStatus>("idle");
   const [syncMsg, setSyncMsg] = useState<string>("");
+  const [guideOpen, setGuideOpen] = useState(false);
 
   // Push subscription state — initialized from the live SW registration.
   const [pushSupported, setPushSupported] = useState(false);
@@ -387,7 +390,7 @@ export default function SettingsPage() {
 
       {/* ───────────── About ───────────── */}
       <Section title="关于">
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-3">
           <div className="flex items-baseline gap-3">
             <span className="serif italic text-h3 leading-none">tokmato</span>
             <span className="mono text-xs text-ink-3">{APP_VERSION}</span>
@@ -395,18 +398,30 @@ export default function SettingsPage() {
           <p className="max-w-prose text-sm leading-relaxed text-ink-2">
             番茄 token 系统：把学习产出和娱乐消费用诚实的会计单位连起来。
           </p>
-          <a
-            href="https://github.com/NihilDigit/tokmato"
-            target="_blank"
-            rel="noreferrer"
-            className="mt-2 inline-flex w-fit min-h-9 items-center gap-2 rounded-full border border-rule px-4 py-1.5 text-[13px] text-ink-2 transition hover:border-ink/30 hover:text-ink"
-          >
-            <GitBranch size={14} />
-            GitHub
-            <ExternalLink size={12} />
-          </a>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setGuideOpen(true)}
+              className="inline-flex w-fit min-h-9 items-center gap-2 rounded-full border border-rule px-4 py-1.5 text-[13px] text-ink-2 transition hover:border-ink/30 hover:text-ink"
+            >
+              <BookOpen size={14} />
+              入门指南
+            </button>
+            <a
+              href="https://github.com/NihilDigit/tokmato"
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex w-fit min-h-9 items-center gap-2 rounded-full border border-rule px-4 py-1.5 text-[13px] text-ink-2 transition hover:border-ink/30 hover:text-ink"
+            >
+              <GitBranch size={14} />
+              GitHub
+              <ExternalLink size={12} />
+            </a>
+          </div>
         </div>
       </Section>
+
+      <WelcomeGuideSheet open={guideOpen} onOpenChange={setGuideOpen} />
     </main>
   );
 }

@@ -1,27 +1,32 @@
 "use client";
 
 /**
- * SettleSheet — 每日结算（F + H + 熬夜）多步 stepper。
+ * SettleSheet — 每日结算（昨日回顾 + H + 熬夜）多步 stepper。
  *
  * 4 个 step：
- *   1. F · 学习产出      — 背单词 toggle + 数学时长 slider
+ *   1. 昨日回顾          — 读 pomodoroHistory 里 yesterdayKey 的 #math 番茄，
+ *                          用 count-up + 阶梯点亮做动画（已实时入账，纯回顾）；
+ *                          底部一个背单词 toggle（番茄追踪不到的唯一 F 项）
  *   2. H · 健康自控      — 6 项 grid toggle，每项 +0.5 H
- *   3. 熬夜申报          — slider 0-6h，每 1h 扣 -2 H
+ *   3. 熬夜申报          — slider 0-6h；超出今日健康分的部分被封顶
  *   4. 总结              — 显示 derived F / H / 净额，一键确认
  *
  * 经济：
- *   F gain = 背单词(0.5) + round(mathMin / 30) * 1
- *   H gain = sum(checks) * 0.5  − overnightH * 2
+ *   F gain = 背单词(0.5)
+ *   H raw  = sum(checks) * 0.5
+ *   H gain = max(0, H raw − overnightH * 2)   ← 不再为负，结算无阻力
  *
  * 设计调性：
  *   - F 部分 tomato accent / H 部分 sage / 熬夜 plum
  *   - 步骤 progress dots 顶部
  *   - toggle 按钮选中态用 col-soft 背景 + col 文字
  *   - 总计大字仅在 step 4（情感峰值），日常 step 内字号克制
+ *   - prefers-reduced-motion: reduce 下动画退化为静态终态
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ResponsiveSheet } from "@/components/ui/responsive-sheet";
+import { useStore, yesterdayKey } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
 export interface SettleSheetProps {
@@ -35,12 +40,12 @@ export interface SettleSheetProps {
 type Step = 1 | 2 | 3 | 4;
 
 type HItemId =
-  | "sleep"
-  | "early"
-  | "water"
   | "exercise"
-  | "diet"
-  | "breakfast";
+  | "exerciseLong"
+  | "sleep8"
+  | "earlyBed"
+  | "noSnack"
+  | "healthyDiet";
 
 interface HItem {
   id: HItemId;
@@ -49,16 +54,16 @@ interface HItem {
 }
 
 const H_ITEMS: HItem[] = [
-  { id: "sleep", label: "睡眠 ≥ 7h" },
-  { id: "early", label: "前夜早睡", hint: "< 1am" },
-  { id: "water", label: "喝水 ≥ 1.5L" },
-  { id: "exercise", label: "运动 ≥ 30 min" },
-  { id: "diet", label: "饮食克制" },
-  { id: "breakfast", label: "早餐有蛋白" },
+  { id: "exercise", label: "进行健身" },
+  { id: "exerciseLong", label: "完成 50 分钟健身" },
+  { id: "sleep8", label: "睡足 8 小时" },
+  { id: "earlyBed", label: "0 点前入睡" },
+  { id: "noSnack", label: "未加餐" },
+  { id: "healthyDiet", label: "饮食健康" },
 ];
 
 const STEP_TITLES: Record<Step, { title: string; sub?: string }> = {
-  1: { title: "结算 · F (学习产出)" },
+  1: { title: "昨日回顾" },
   2: { title: "结算 · H (健康自控)" },
   3: { title: "熬夜申报" },
   4: { title: "今日入账" },
@@ -72,14 +77,13 @@ export function SettleSheet({
 }: SettleSheetProps) {
   const [step, setStep] = useState<Step>(1);
   const [vocab, setVocab] = useState(false);
-  const [mathMin, setMathMin] = useState(60);
   const [hChecks, setHChecks] = useState<Record<HItemId, boolean>>({
-    sleep: false,
-    early: false,
-    water: false,
     exercise: false,
-    diet: false,
-    breakfast: false,
+    exerciseLong: false,
+    sleep8: false,
+    earlyBed: false,
+    noSnack: false,
+    healthyDiet: false,
   });
   const [overnightH, setOvernightH] = useState(0);
 
@@ -89,21 +93,18 @@ export function SettleSheet({
     if (!open) return;
     setStep(1);
     setVocab(false);
-    setMathMin(60);
     setHChecks({
-      sleep: false,
-      early: false,
-      water: false,
       exercise: false,
-      diet: false,
-      breakfast: false,
+      exerciseLong: false,
+      sleep8: false,
+      earlyBed: false,
+      noSnack: false,
+      healthyDiet: false,
     });
     setOvernightH(0);
   }, [open]);
 
   // Derived ledger — recomputed every render, cheap.
-  // 数学时长不在结算里算 — 由番茄 #math tag 自动累加进 todayMathPomos +
-  // ftoken。结算只处理无法被番茄追踪的项目（背单词等）。
   const fGained = useMemo(() => (vocab ? 0.5 : 0), [vocab]);
 
   const hRaw = useMemo(
@@ -115,8 +116,12 @@ export function SettleSheet({
     [hChecks],
   );
 
-  const overnightLoss = overnightH * 2;
-  const hGained = hRaw - overnightLoss;
+  // Overnight reduces the day's H gain but never below 0. The settlement
+  // click should always feel like pure-positive bookkeeping; staying up
+  // erases the day's reward without dipping into the saved balance.
+  const rawOvernightLoss = overnightH * 2;
+  const effectiveOvernightLoss = Math.min(rawOvernightLoss, hRaw);
+  const hGained = hRaw - effectiveOvernightLoss;
 
   const goNext = () =>
     setStep((s) => (s < 4 ? ((s + 1) as Step) : s));
@@ -146,7 +151,12 @@ export function SettleSheet({
         <ProgressDots current={step} accent={accentForStep(step)} />
 
         {step === 1 && (
-          <FStep vocab={vocab} setVocab={setVocab} fGained={fGained} />
+          <RecapStep
+            open={open}
+            vocab={vocab}
+            setVocab={setVocab}
+            fGained={fGained}
+          />
         )}
         {step === 2 && (
           <HStep hChecks={hChecks} setHChecks={setHChecks} hRaw={hRaw} />
@@ -155,14 +165,16 @@ export function SettleSheet({
           <OvernightStep
             overnightH={overnightH}
             setOvernightH={setOvernightH}
-            overnightLoss={overnightLoss}
+            effectiveLoss={effectiveOvernightLoss}
+            wouldBeLoss={rawOvernightLoss}
+            cappedAtRaw={rawOvernightLoss > hRaw && hRaw > 0}
           />
         )}
         {step === 4 && (
           <SummaryStep
             fGained={fGained}
             hRaw={hRaw}
-            overnightLoss={overnightLoss}
+            effectiveOvernightLoss={effectiveOvernightLoss}
             hGained={hGained}
           />
         )}
@@ -237,23 +249,161 @@ function ProgressDots({
 }
 
 /* ────────────────────────────────────────────────────────────────────────── */
-/*  Step 1 — F                                                                 */
+/*  Step 1 — 昨日回顾                                                          */
 /* ────────────────────────────────────────────────────────────────────────── */
 
-function FStep({
+function RecapStep({
+  open,
   vocab,
   setVocab,
   fGained,
 }: {
+  open: boolean;
   vocab: boolean;
   setVocab: (v: boolean) => void;
   fGained: number;
 }) {
+  // Pull yesterday's (the day being settled) data from the persisted
+  // history. Math F was credited in real time inside endSession — this
+  // step is purely retrospective; no new tokens are awarded here.
+  const pomodoroHistory = useStore((s) => s.pomodoroHistory);
+  const yKey = useMemo(() => yesterdayKey(), []);
+  const yesterdays = useMemo(
+    () => pomodoroHistory.filter((p) => p.dayKey === yKey),
+    [pomodoroHistory, yKey],
+  );
+  const totalPomos = useMemo(
+    () => yesterdays.reduce((sum, p) => sum + p.count, 0),
+    [yesterdays],
+  );
+  const mathPomos = useMemo(
+    () =>
+      yesterdays
+        .filter((p) => p.tag === "math")
+        .reduce((sum, p) => sum + p.count, 0),
+    [yesterdays],
+  );
+  const mathF = useMemo(
+    () =>
+      yesterdays
+        .filter((p) => p.tag === "math")
+        .reduce((sum, p) => sum + p.fGained + p.bonusF, 0),
+    [yesterdays],
+  );
+  const totalF = useMemo(
+    () =>
+      yesterdays.reduce((sum, p) => sum + p.fGained + p.bonusF, 0),
+    [yesterdays],
+  );
+
+  const hasData = totalPomos > 0;
+  const ladderTarget = Math.min(mathPomos, 11);
+
+  // Animation state — count-up driven by rAF; each ladder cell lights up
+  // in sequence. Reset on every (re)open via `open` key.
+  const [animPomos, setAnimPomos] = useState(0);
+  const [ladderFilled, setLadderFilled] = useState(0);
+  const animRunRef = useRef(0);
+
+  useEffect(() => {
+    if (!open) return;
+    animRunRef.current += 1;
+    const myRun = animRunRef.current;
+
+    const reduced =
+      typeof window !== "undefined" &&
+      window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+
+    if (!hasData || reduced) {
+      setAnimPomos(totalPomos);
+      setLadderFilled(ladderTarget);
+      return;
+    }
+
+    setAnimPomos(0);
+    setLadderFilled(0);
+
+    const COUNT_DURATION = 600;
+    const LADDER_STEP = 70;
+    const start = performance.now();
+
+    let raf = 0;
+    const tick = (t: number) => {
+      if (animRunRef.current !== myRun) return;
+      const p = Math.min(1, (t - start) / COUNT_DURATION);
+      // ease-out cubic
+      const eased = 1 - Math.pow(1 - p, 3);
+      setAnimPomos(Math.round(eased * totalPomos));
+      if (p < 1) {
+        raf = requestAnimationFrame(tick);
+      }
+    };
+    raf = requestAnimationFrame(tick);
+
+    const ladderTimers: ReturnType<typeof setTimeout>[] = [];
+    for (let i = 1; i <= ladderTarget; i++) {
+      ladderTimers.push(
+        setTimeout(() => {
+          if (animRunRef.current !== myRun) return;
+          setLadderFilled(i);
+        }, COUNT_DURATION + i * LADDER_STEP),
+      );
+    }
+
+    return () => {
+      cancelAnimationFrame(raf);
+      ladderTimers.forEach(clearTimeout);
+    };
+  }, [open, hasData, totalPomos, ladderTarget]);
+
   return (
-    <div className="flex flex-col gap-6">
-      {/* Vocab toggle — 数学时长由 #math 番茄自动累计，不在这里算 */}
+    <div className="flex flex-col gap-5">
+      <div className="rounded-2xl border border-rule bg-paper-2/40 px-5 py-5">
+        <div className="smallcaps mb-3">昨日番茄</div>
+
+        {hasData ? (
+          <>
+            <div className="flex items-baseline justify-between gap-3">
+              <div className="flex items-baseline gap-2">
+                <span className="font-serif italic text-[44px] leading-none tabular-nums text-tomato">
+                  {animPomos}
+                </span>
+                <span className="text-sm text-ink-3">个番茄</span>
+              </div>
+              <div className="flex flex-col items-end gap-0.5">
+                <span className="font-mono text-[13px] tabular-nums text-tomato-deep">
+                  +{totalF.toFixed(1)} F
+                </span>
+                <span className="smallcaps text-ink-mute">已入账</span>
+              </div>
+            </div>
+
+            <MathLadder current={mathPomos} filled={ladderFilled} />
+
+            <div className="mt-3 flex items-center justify-between text-[12px] text-ink-3">
+              <span>
+                数学 <span className="font-mono tabular-nums text-ink-2">{mathPomos}</span>
+                {" · 含阶梯奖 "}
+                <span className="font-mono tabular-nums text-ink-2">+{mathF.toFixed(1)} F</span>
+              </span>
+              <span className="text-ink-mute">不重复入账</span>
+            </div>
+          </>
+        ) : (
+          <div className="py-2">
+            <div className="font-serif italic text-[28px] leading-none text-ink-3">
+              昨日无番茄记录
+            </div>
+            <p className="mt-2 text-[12px] text-ink-mute">
+              新装或休息日 · 直接进下一步
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* Vocab toggle — the one fragmentary F item the pomodoro can't track. */}
       <div>
-        <div className="smallcaps mb-2.5">背单词</div>
+        <div className="smallcaps mb-2.5">番茄外的产出</div>
         <button
           type="button"
           role="checkbox"
@@ -278,7 +428,7 @@ function FStep({
             >
               {vocab ? "✓" : "⨯"}
             </span>
-            <span className="text-[14px]">今天背了单词</span>
+            <span className="text-[14px]">背了单词</span>
           </div>
           <span
             className={cn(
@@ -291,13 +441,48 @@ function FStep({
         </button>
       </div>
 
-      {/* Subtotal */}
       <div className="flex items-baseline justify-between border-t border-rule pt-4">
-        <span className="smallcaps">F 小计</span>
+        <span className="smallcaps">F 本次结算</span>
         <span className="font-serif text-[24px] tabular-nums text-tomato">
           +{fGained.toFixed(1)} F
         </span>
       </div>
+    </div>
+  );
+}
+
+/** Math bonus ladder — 11 cells, milestones at 5/7/9/11. Reuses the
+ *  visual vocabulary of Home's ProgressCard ladder but drives `filled`
+ *  externally so RecapStep can animate cells lighting up in sequence. */
+function MathLadder({
+  current,
+  filled,
+}: {
+  current: number;
+  filled: number;
+}) {
+  return (
+    <div className="mt-4 flex gap-1">
+      {Array.from({ length: 11 }, (_, i) => i + 1).map((i) => {
+        const isMilestone = [5, 7, 9, 11].includes(i);
+        const lit = i <= filled;
+        const wouldBeLit = i <= current;
+        return (
+          <div
+            key={i}
+            className={cn(
+              "h-2 flex-1 rounded-sm transition-colors duration-300",
+              lit
+                ? "bg-tomato"
+                : isMilestone
+                  ? wouldBeLit
+                    ? "bg-gold-soft"
+                    : "bg-gold-soft/60"
+                  : "bg-ink/10",
+            )}
+          />
+        );
+      })}
     </div>
   );
 }
@@ -393,11 +578,15 @@ function HStep({
 function OvernightStep({
   overnightH,
   setOvernightH,
-  overnightLoss,
+  effectiveLoss,
+  wouldBeLoss,
+  cappedAtRaw,
 }: {
   overnightH: number;
   setOvernightH: (n: number) => void;
-  overnightLoss: number;
+  effectiveLoss: number;
+  wouldBeLoss: number;
+  cappedAtRaw: boolean;
 }) {
   return (
     <div className="flex flex-col gap-5">
@@ -422,7 +611,7 @@ function OvernightStep({
               overnightH > 0 ? "text-plum" : "text-ink-mute",
             )}
           >
-            {overnightH > 0 ? `−${overnightLoss} H` : "—"}
+            {overnightH > 0 ? `−${effectiveLoss} H` : "—"}
           </span>
         </div>
 
@@ -445,9 +634,14 @@ function OvernightStep({
       </div>
 
       <div className="border-t border-rule pt-3 text-[12px] text-ink-3">
-        每 1h = <span className="font-mono text-plum">−2 H</span>
+        每 1h <span className="font-mono text-plum">−2 H</span>
         <span className="mx-2 text-ink-mute">·</span>
-        被动失眠不算在内
+        最多抵消今日 H 收益 · 不会让 H 总余额变负
+        {cappedAtRaw && (
+          <span className="ml-2 text-ink-mute">
+            （滑到 {overnightH}h 名义 −{wouldBeLoss}，实际抵消 −{effectiveLoss}）
+          </span>
+        )}
       </div>
     </div>
   );
@@ -460,12 +654,12 @@ function OvernightStep({
 function SummaryStep({
   fGained,
   hRaw,
-  overnightLoss,
+  effectiveOvernightLoss,
   hGained,
 }: {
   fGained: number;
   hRaw: number;
-  overnightLoss: number;
+  effectiveOvernightLoss: number;
   hGained: number;
 }) {
   return (
@@ -478,34 +672,28 @@ function SummaryStep({
             <span className="ml-1 font-sans text-base text-ink-3">F</span>
           </span>
           <span className="text-ink-mute">·</span>
-          <span
-            className={cn(
-              "font-serif italic text-[44px] leading-none tabular-nums",
-              hGained < 0 ? "text-plum" : "text-sage-deep",
-            )}
-          >
-            {hGained >= 0 ? "+" : ""}
-            {hGained.toFixed(1)}
+          <span className="font-serif italic text-[44px] leading-none tabular-nums text-sage-deep">
+            +{hGained.toFixed(1)}
             <span className="ml-1 font-sans text-base text-ink-3">H</span>
           </span>
         </div>
       </div>
 
       <dl className="flex flex-col gap-2 text-[13px]">
-        <Row label="F · 学习产出" value={`+${fGained.toFixed(1)}`} tone="tomato" />
+        <Row label="F · 番茄外产出" value={`+${fGained.toFixed(1)}`} tone="tomato" />
         <Row label="H · 健康基础分" value={`+${hRaw.toFixed(1)}`} tone="sage" />
-        {overnightLoss > 0 && (
+        {effectiveOvernightLoss > 0 && (
           <Row
-            label="H · 熬夜扣分"
-            value={`−${overnightLoss.toFixed(1)}`}
+            label="H · 熬夜抵消"
+            value={`−${effectiveOvernightLoss.toFixed(1)}`}
             tone="plum"
           />
         )}
         <div className="my-1 h-px bg-rule" />
         <Row
           label="H 净入账"
-          value={`${hGained >= 0 ? "+" : ""}${hGained.toFixed(1)}`}
-          tone={hGained < 0 ? "plum" : "sage"}
+          value={`+${hGained.toFixed(1)}`}
+          tone="sage"
           strong
         />
       </dl>
