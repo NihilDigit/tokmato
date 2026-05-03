@@ -13,6 +13,10 @@ import {
 } from "@/app/actions/active-session";
 import { useActiveSession } from "@/lib/use-active-session";
 import { RemoteActiveView } from "@/components/home/RemoteActiveView";
+import { enumerateTiers } from "@/lib/bonus";
+import { TAG_BG_CLASSES, TAG_TEXT_CLASSES } from "@/lib/tag-colors";
+import type { BonusConfig, TagConfig } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
 const POMO_MS = 25 * 60 * 1000;
 
@@ -23,10 +27,9 @@ export default function HomePage() {
   const htoken = useStore((s) => s.htoken);
   const timePool = useStore((s) => s.timePool);
   const todayPomos = useStore((s) => s.todayPomos);
-  // v1.8: math counter is one entry in todayCountsByTag. The hint logic
-  // in nextMathBonusHint still hardcodes the 5/7/9/11 ladder; Phase B
-  // will rewrite Home's bonus hints to read from BonusConfig.
-  const todayMath = useStore((s) => s.todayCountsByTag.math ?? 0);
+  const todayCountsByTag = useStore((s) => s.todayCountsByTag);
+  const tags = useStore((s) => s.tags);
+  const bonuses = useStore((s) => s.bonuses);
   const todayFGained = useStore((s) => s.todayFGained);
   const todayHGained = useStore((s) => s.todayHGained);
   const todayPoolGained = useStore((s) => s.todayPoolGained);
@@ -83,7 +86,6 @@ export default function HomePage() {
     setInitialTask(task);
     setOpenStart(true);
   };
-  const mathHint = nextMathBonusHint(todayMath);
 
   return (
     <main className="flex flex-col gap-6">
@@ -141,16 +143,23 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Today progress — Bonus ladder only (today total is in TopBalances) */}
-      <section>
-        <ProgressCard
-          kicker="今日 · 数学 BONUS"
-          value={todayMath}
-          unit="个 #math 番茄"
-          hint={mathHint}
-          ladder
-        />
-      </section>
+      {/* Today progress — one Bonus ladder card per configured bonus */}
+      {bonuses.length > 0 && (
+        <section className="flex flex-col gap-3">
+          {bonuses.map((bonus) => {
+            const tag = tags.find((t) => t.id === bonus.tagId);
+            const count = todayCountsByTag[bonus.tagId] ?? 0;
+            return (
+              <BonusProgressCard
+                key={bonus.id}
+                bonus={bonus}
+                count={count}
+                tag={tag}
+              />
+            );
+          })}
+        </section>
+      )}
 
       {/* Sheets */}
       <StartSheet
@@ -208,12 +217,19 @@ function fmtSigned(value: number, unit = "") {
   return `${prefix}${rounded}${unit ? " " + unit : ""}`;
 }
 
-function nextMathBonusHint(todayMath: number) {
-  const milestones = [5, 7, 9, 11];
-  const next = milestones.find((m) => todayMath < m);
-  if (!next) return "今日数学 bonus 已满";
-  const left = next - todayMath;
-  return `再做 ${left} 个解锁 +1F bonus`;
+function nextBonusHint(bonus: BonusConfig, count: number): string {
+  // Find the smallest unreached tier given the unbounded ladder.
+  if (count < bonus.threshold) {
+    const left = bonus.threshold - count;
+    return `再做 ${left} 个解锁 +${bonus.initialReward} F bonus`;
+  }
+  if (bonus.step <= 0) return "本档已满 · 设置里加步长可继续外推";
+  // count >= threshold; find next tier = threshold + n*step where n is
+  // the smallest integer making the tier > count.
+  const passed = Math.floor((count - bonus.threshold) / bonus.step);
+  const next = bonus.threshold + (passed + 1) * bonus.step;
+  const left = next - count;
+  return `再做 ${left} 个解锁 +${bonus.stepReward} F bonus`;
 }
 
 function BalanceCell({
@@ -241,41 +257,58 @@ function BalanceCell({
   );
 }
 
-function ProgressCard({
-  kicker,
-  value,
-  unit,
-  hint,
-  ladder,
+function BonusProgressCard({
+  bonus,
+  count,
+  tag,
 }: {
-  kicker: string;
-  value: number;
-  unit: string;
-  hint?: string;
-  ladder?: boolean;
+  bonus: BonusConfig;
+  count: number;
+  tag: TagConfig | undefined;
 }) {
+  const tiers = enumerateTiers(bonus, count);
+  const fillBg = tag ? TAG_BG_CLASSES[tag.color] : "bg-ink";
+  const labelText = tag ? TAG_TEXT_CLASSES[tag.color] : "text-ink-3";
+  const tagLabel = tag?.label ?? bonus.tagId;
+  // Visual ladder: cells from 1..maxCells, where maxCells covers up to
+  // two tiers ahead of the current count (so the user always sees the
+  // next milestone they're working toward).
+  const maxCells = Math.max(
+    bonus.threshold + 2 * Math.max(bonus.step, 1),
+    count + 2,
+  );
+  const milestoneSet = new Set(tiers.map((t) => t.pomos));
   return (
     <div className="rounded-xl border border-rule bg-paper p-5">
-      <div className="smallcaps mb-2">{kicker}</div>
-      <div className="flex items-baseline gap-2">
-        <span className="serif text-stat leading-none">{value}</span>
-        <span className="text-sm text-ink-3">{unit}</span>
+      <div className={cn("smallcaps mb-2", labelText)}>
+        今日 · {tagLabel} BONUS
       </div>
-      {hint && <div className="mt-3 text-[13px] leading-relaxed text-ink-2">{hint}</div>}
-      {ladder && (
-        <div className="mt-4 flex gap-1">
-          {Array.from({ length: 11 }, (_, i) => i + 1).map((i) => {
-            const isMilestone = [5, 7, 9, 11].includes(i);
-            const filled = i <= value;
-            return (
-              <div
-                key={i}
-                className={`h-2 flex-1 rounded-sm ${filled ? "bg-tomato" : isMilestone ? "bg-gold-soft" : "bg-ink/10"}`}
-              />
-            );
-          })}
-        </div>
-      )}
+      <div className="flex items-baseline gap-2">
+        <span className="serif text-stat leading-none">{count}</span>
+        <span className="text-sm text-ink-3">个 {tagLabel} 番茄</span>
+      </div>
+      <div className="mt-3 text-[13px] leading-relaxed text-ink-2">
+        {nextBonusHint(bonus, count)}
+      </div>
+      <div className="mt-4 flex gap-1">
+        {Array.from({ length: maxCells }, (_, i) => i + 1).map((i) => {
+          const isMilestone = milestoneSet.has(i);
+          const filled = i <= count;
+          return (
+            <div
+              key={i}
+              className={cn(
+                "h-2 flex-1 rounded-sm",
+                filled
+                  ? fillBg
+                  : isMilestone
+                    ? "bg-gold-soft"
+                    : "bg-ink/10",
+              )}
+            />
+          );
+        })}
+      </div>
     </div>
   );
 }

@@ -4,6 +4,8 @@ import { useMemo } from "react";
 import { Download } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { todayKey, useStore } from "@/lib/store";
+import { TAG_BG_CLASSES, TAG_CHIP_CLASSES } from "@/lib/tag-colors";
+import type { TagColor, TagConfig } from "@/lib/types";
 
 // ─────────────────────────────────────────────────────────────────────────
 // Journey — 年度回顾
@@ -11,60 +13,29 @@ import { todayKey, useStore } from "@/lib/store";
 // 当前只展示本地 store 已有的真实记录；没有历史表时保持空态。
 // ─────────────────────────────────────────────────────────────────────────
 
-type TagId = "all" | "cs" | "math" | "english" | "others" | "trash";
-
-const TAGS: { id: TagId; label: string }[] = [
-  { id: "all", label: "全部" },
-  { id: "cs", label: "#cs" },
-  { id: "math", label: "#math" },
-  { id: "english", label: "#english" },
-  { id: "others", label: "#others" },
-  { id: "trash", label: "#trash" },
-];
-
-// Each tag → 5-step opacity ladder mapped to a token. Cell `0` is the
-// neutral empty state (uses `--ink` 5%); `4` is the saturated end.
 const HEATMAP_OPACITY = [5, 18, 40, 65, 95] as const;
-const HEATMAP_TONE: Record<TagId, string> = {
-  all: "bg-tomato",
-  math: "bg-tomato",
-  cs: "bg-ink",
-  english: "bg-sage",
-  others: "bg-gold",
-  trash: "bg-plum",
-};
 
-// Phase B (v1.8) will replace these with reads from useStore().tags;
-// for the data-layer-compatibility cut, accept any tag id (history may
-// reference archived ids) and fall back to neutral styling.
-const TAG_BAR: Record<string, string> = {
-  cs: "bg-ink",
-  math: "bg-tomato",
-  english: "bg-sage",
-  others: "bg-gold",
-  trash: "bg-plum",
-};
-
-const TAG_CHIP: Record<string, string> = {
-  cs: "bg-paper-2 text-ink",
-  math: "bg-tomato text-white",
-  english: "bg-sage text-white",
-  others: "bg-gold-soft text-ink",
-  trash: "bg-plum text-white",
-};
-
-const TAG_LABEL: Record<string, string> = {
-  cs: "#cs",
-  math: "#math",
-  english: "#english",
-  others: "#others",
-  trash: "#trash",
+/** Map TagColor → CSS var ref for SVG fill (Donut needs concrete color
+ *  values, not Tailwind classes). Mirrors TAG_BG_CLASSES key set. */
+const TAG_FILL_VAR: Record<TagColor, string> = {
+  tomato: "var(--tomato)",
+  sage: "var(--sage)",
+  teal: "var(--teal)",
+  gold: "var(--gold)",
+  plum: "var(--plum)",
+  ocean: "var(--ocean)",
+  moss: "var(--moss)",
+  amber: "var(--amber)",
+  rose: "var(--rose)",
+  slate: "var(--slate)",
 };
 
 export default function JourneyPage() {
   const todayPomos = useStore((s) => s.todayPomos);
   const pomodoroHistory = useStore((s) => s.pomodoroHistory);
   const tokenHistory = useStore((s) => s.tokenHistory);
+  const tags = useStore((s) => s.tags);
+  void todayPomos;
 
   const last30Keys = useMemo(() => {
     const keys: string[] = [];
@@ -91,20 +62,11 @@ export default function JourneyPage() {
     longestStreak: longestStreak(last30Keys, recentRecords),
   };
 
-  const distribution: { tag: Exclude<TagId, "all">; pct: number }[] = useMemo(() => {
+  const distribution: { tag: TagConfig; pct: number }[] = useMemo(() => {
     const total = recentRecords.reduce((sum, r) => sum + r.count, 0);
     if (total <= 0) {
-      return [
-        { tag: "math", pct: 0 },
-        { tag: "cs", pct: 0 },
-        { tag: "english", pct: 0 },
-        { tag: "others", pct: 0 },
-        { tag: "trash", pct: 0 },
-      ];
+      return tags.map((t) => ({ tag: t, pct: 0 }));
     }
-    // Phase B (v1.8) will rewrite distribution to enumerate the
-    // user's configured tags. For now keep the legacy 5-tag shape but
-    // accept any tag id from history (records may carry archived ids).
     const counts: Record<string, number> = recentRecords.reduce(
       (acc: Record<string, number>, r) => {
         acc[r.tag] = (acc[r.tag] ?? 0) + r.count;
@@ -112,11 +74,11 @@ export default function JourneyPage() {
       },
       {},
     );
-    return (["math", "cs", "english", "others", "trash"] as const).map((tag) => ({
-      tag,
-      pct: Math.round(((counts[tag] ?? 0) / total) * 100),
+    return tags.map((t) => ({
+      tag: t,
+      pct: Math.round(((counts[t.id] ?? 0) / total) * 100),
     }));
-  }, [recentRecords]);
+  }, [recentRecords, tags]);
 
   const heatmapCounts = useMemo(() => {
     const byDay = new Map<string, number>();
@@ -126,15 +88,20 @@ export default function JourneyPage() {
     return last30Keys.map((key) => byDay.get(key) ?? 0);
   }, [last30Keys, recentRecords]);
 
+  const tagById = useMemo(() => {
+    const m = new Map<string, TagConfig>();
+    for (const t of tags) m.set(t.id, t);
+    return m;
+  }, [tags]);
+
   const recentStrings = recentRecords.slice(0, 20).map((record) => ({
     task: record.task,
-    tag: record.tag,
+    tag: tagById.get(record.tag),
+    tagRaw: record.tag,
     count: record.count,
     mins: record.minutes,
     date: formatRecordTime(record.endedAt),
   }));
-
-  const activeTag: TagId = "all";
 
   return (
     <main className="flex flex-col gap-10">
@@ -173,32 +140,34 @@ export default function JourneyPage() {
       <section className="flex flex-col gap-4">
         <SectionHead title="30 天的痕迹" />
 
-        {/* Tag filter row — drives heatmap tone. */}
+        {/* Tag filter row — visual only for now. */}
         <div className="flex flex-wrap gap-1.5">
-          {TAGS.map((t) => {
-            const active = t.id === activeTag;
-            return (
-              <button
-                key={t.id}
-                type="button"
-                className={cn(
-                  "rounded-full border px-3 py-1 text-xs transition",
-                  t.id !== "all" && "font-mono",
-                  active
-                    ? "border-transparent bg-ink text-paper"
-                    : "border-rule text-ink-3 hover:border-ink/30 hover:text-ink"
-                )}
-              >
-                {t.label}
-              </button>
-            );
-          })}
+          <button
+            type="button"
+            className={cn(
+              "rounded-full border px-3 py-1 text-xs transition",
+              "border-transparent bg-ink text-paper",
+            )}
+          >
+            全部
+          </button>
+          {tags.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              className={cn(
+                "rounded-full border border-rule px-3 py-1 text-xs font-mono text-ink-3 transition hover:border-ink/30 hover:text-ink",
+              )}
+            >
+              {t.label}
+            </button>
+          ))}
         </div>
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           {/* Left: heatmap */}
           <div className="rounded-xl border border-rule bg-paper p-5">
-            <Heatmap tag={activeTag} counts={heatmapCounts} />
+            <Heatmap toneClass="bg-tomato" counts={heatmapCounts} />
             <div className="mono mt-3.5 flex items-center justify-between text-[11px] text-ink-mute">
               <span>30 天前</span>
               <div className="flex items-center gap-1.5">
@@ -206,7 +175,7 @@ export default function JourneyPage() {
                 {HEATMAP_OPACITY.map((op, i) => (
                   <span
                     key={i}
-                    className={cn("h-2.5 w-2.5 rounded-[2px]", HEATMAP_TONE[activeTag])}
+                    className={cn("h-2.5 w-2.5 rounded-[2px] bg-tomato")}
                     style={{ opacity: op / 100 }}
                   />
                 ))}
@@ -221,9 +190,12 @@ export default function JourneyPage() {
             <Donut data={distribution} />
             <ul className="flex flex-col gap-2.5">
               {distribution.map((d) => (
-                <li key={d.tag} className="flex items-center gap-2">
-                  <span className={cn("h-2.5 w-2.5 rounded-[2px]", TAG_BAR[d.tag])} aria-hidden />
-                  <span className="mono text-xs text-ink-3">{TAG_LABEL[d.tag]}</span>
+                <li key={d.tag.id} className="flex items-center gap-2">
+                  <span
+                    className={cn("h-2.5 w-2.5 rounded-[2px]", TAG_BG_CLASSES[d.tag.color])}
+                    aria-hidden
+                  />
+                  <span className="mono text-xs text-ink-3">{d.tag.label}</span>
                   <span className="serif text-base leading-none text-ink">
                     {d.pct}
                     <span className="ml-0.5 text-[11px] text-ink-3">%</span>
@@ -270,10 +242,12 @@ export default function JourneyPage() {
                   <span
                     className={cn(
                       "mono inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[11px]",
-                      TAG_CHIP[r.tag]
+                      r.tag
+                        ? TAG_CHIP_CLASSES[r.tag.color]
+                        : "border border-dashed border-rule text-ink-mute",
                     )}
                   >
-                    {TAG_LABEL[r.tag]}
+                    {r.tag?.label ?? r.tagRaw}
                   </span>
                   <span className="serif truncate text-base text-ink sm:text-[17px]">
                     {r.task}
@@ -393,21 +367,12 @@ function exportJourneyJson(records: unknown[]) {
   URL.revokeObjectURL(url);
 }
 
-// Donut chart — token-driven slices, CSS-var-as-fill via inline style.
-const TAG_FILL: Record<Exclude<TagId, "all">, string> = {
-  cs: "var(--ink)",
-  math: "var(--tomato)",
-  english: "var(--sage)",
-  others: "var(--gold)",
-  trash: "var(--plum)",
-};
-
 function Donut({
   data,
   size = 140,
   thickness = 24,
 }: {
-  data: { tag: Exclude<TagId, "all">; pct: number }[];
+  data: { tag: TagConfig; pct: number }[];
   size?: number;
   thickness?: number;
 }) {
@@ -430,9 +395,9 @@ function Donut({
         const path = `M ${cx} ${cy} L ${x1} ${y1} A ${r} ${r} 0 ${large} 1 ${x2} ${y2} Z`;
         const slice = (
           <path
-            key={d.tag}
+            key={d.tag.id}
             d={path}
-            fill={TAG_FILL[d.tag]}
+            fill={TAG_FILL_VAR[d.tag.color]}
             stroke="var(--paper)"
             strokeWidth="1"
           />
@@ -448,13 +413,13 @@ function Donut({
 
 // Heatmap — past 30 days as a 3 rows × 10 cols grid of small squares.
 // Reading order = time order: top-left = 29 days ago, bottom-right = today.
-// Colors flow through HEATMAP_TONE + opacity ladder. Each cell shows a
-// native browser tooltip on hover.
-function Heatmap({ tag, counts }: { tag: TagId; counts: number[] }) {
+// `toneClass` is a Tailwind bg class string (e.g. "bg-tomato"); each cell
+// stacks an opacity from the level ladder.
+function Heatmap({ toneClass, counts }: { toneClass: string; counts: number[] }) {
   const ROWS = 3;
   const COLS = 10;
   const TOTAL = ROWS * COLS; // 30
-  const tone = HEATMAP_TONE[tag];
+  const tone = toneClass;
 
   const today = new Date();
 

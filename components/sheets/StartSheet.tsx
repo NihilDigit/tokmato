@@ -13,6 +13,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Play } from "lucide-react";
 import { ResponsiveSheet } from "@/components/ui/responsive-sheet";
+import { useStore } from "@/lib/store";
+import { TAG_CHIP_CLASSES } from "@/lib/tag-colors";
 import { cn } from "@/lib/utils";
 import type { TagId, SessionType } from "@/lib/types";
 
@@ -25,23 +27,6 @@ export interface StartSheetProps {
   initialTask?: string;
   onConfirm: (data: { task: string; tag: TagId; type: SessionType }) => void;
 }
-
-type TagDef = {
-  id: TagId;
-  label: string;
-  /** Active state classes — bg + text together. */
-  active: string;
-};
-
-// Inline TAGS — colors derived from legacy/tokmato.html line 88-94, but
-// expressed in token utility classes (no raw hex).
-const TAGS: TagDef[] = [
-  { id: "cs", label: "#cs", active: "bg-paper-2 text-ink" },
-  { id: "math", label: "#math", active: "bg-tomato text-white" },
-  { id: "english", label: "#english", active: "bg-sage text-white" },
-  { id: "others", label: "#others", active: "bg-gold-soft text-ink" },
-  { id: "trash", label: "#trash", active: "bg-plum text-white" },
-];
 
 type TypeOptionDef = {
   id: SessionType;
@@ -62,8 +47,11 @@ export function StartSheet({
   initialTask,
   onConfirm,
 }: StartSheetProps) {
+  const tags = useStore((s) => s.tags);
+  // Default to math if it exists (preserves v1.7 default), else first tag.
+  const defaultTagId = tags.find((t) => t.id === "math")?.id ?? tags[0]?.id ?? "";
   const [task, setTask] = useState(initialTask ?? "");
-  const [tag, setTag] = useState<TagId>("math");
+  const [tag, setTag] = useState<TagId>(defaultTagId);
   const [type, setType] = useState<SessionType>("input");
   const inputRef = useRef<HTMLInputElement | null>(null);
 
@@ -72,12 +60,17 @@ export function StartSheet({
   useEffect(() => {
     if (!open) return;
     setTask(initialTask ?? "");
+    // If the previously-selected tag was deleted while the sheet was
+    // closed, fall back to the default.
+    if (!tags.some((t) => t.id === tag)) {
+      setTag(defaultTagId);
+    }
     // Defer focus until sheet animation has mounted the input.
     const id = window.setTimeout(() => inputRef.current?.focus(), 60);
     return () => window.clearTimeout(id);
-  }, [open, initialTask]);
+  }, [open, initialTask, tags, tag, defaultTagId]);
 
-  const canStart = task.trim().length > 0;
+  const canStart = task.trim().length > 0 && tag.length > 0;
 
   const handleConfirm = () => {
     if (!canStart) return;
@@ -148,34 +141,38 @@ export function StartSheet({
         {/* Tag — single select. */}
         <div>
           <div className="smallcaps mb-2.5">Tag · 单选</div>
-          <div
-            className="flex flex-wrap gap-1.5"
-            role="radiogroup"
-            aria-label="任务标签"
-          >
-            {TAGS.map((t) => {
-              const isActive = tag === t.id;
-              return (
-                <button
-                  key={t.id}
-                  type="button"
-                  role="radio"
-                  aria-checked={isActive}
-                  onClick={() => setTag(t.id)}
-                  className={cn(
-                    "rounded-full px-3.5 py-1.5",
-                    "font-mono text-[13px] leading-none",
-                    "transition-colors",
-                    isActive
-                      ? cn(t.active, "border border-transparent")
-                      : "bg-transparent text-ink-3 border border-rule hover:text-ink-2"
-                  )}
-                >
-                  {t.label}
-                </button>
-              );
-            })}
-          </div>
+          {tags.length === 0 ? (
+            <p className="text-sm text-ink-3">还没有 Tag · 到设置页新建一个。</p>
+          ) : (
+            <div
+              className="flex flex-wrap gap-1.5"
+              role="radiogroup"
+              aria-label="任务标签"
+            >
+              {tags.map((t) => {
+                const isActive = tag === t.id;
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={isActive}
+                    onClick={() => setTag(t.id)}
+                    className={cn(
+                      "rounded-full px-3.5 py-1.5",
+                      "font-mono text-[13px] leading-none",
+                      "transition-colors",
+                      isActive
+                        ? cn(TAG_CHIP_CLASSES[t.color], "border border-transparent")
+                        : "bg-transparent text-ink-3 border border-rule hover:text-ink-2",
+                    )}
+                  >
+                    {t.label}
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {/* Type — input vs output. */}

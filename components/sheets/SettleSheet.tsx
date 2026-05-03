@@ -27,6 +27,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ResponsiveSheet } from "@/components/ui/responsive-sheet";
 import { useStore, yesterdayKey } from "@/lib/store";
+import { enumerateTiers } from "@/lib/bonus";
+import { TAG_BG_CLASSES, TAG_CHIP_CLASSES } from "@/lib/tag-colors";
+import type { BonusConfig, TagConfig } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 export interface SettleSheetProps {
@@ -267,6 +270,8 @@ function RecapStep({
   // history. Math F was credited in real time inside endSession — this
   // step is purely retrospective; no new tokens are awarded here.
   const pomodoroHistory = useStore((s) => s.pomodoroHistory);
+  const tags = useStore((s) => s.tags);
+  const bonuses = useStore((s) => s.bonuses);
   const yKey = useMemo(() => yesterdayKey(), []);
   const yesterdays = useMemo(
     () => pomodoroHistory.filter((p) => p.dayKey === yKey),
@@ -276,28 +281,46 @@ function RecapStep({
     () => yesterdays.reduce((sum, p) => sum + p.count, 0),
     [yesterdays],
   );
-  const mathPomos = useMemo(
-    () =>
-      yesterdays
-        .filter((p) => p.tag === "math")
-        .reduce((sum, p) => sum + p.count, 0),
-    [yesterdays],
-  );
-  const mathF = useMemo(
-    () =>
-      yesterdays
-        .filter((p) => p.tag === "math")
-        .reduce((sum, p) => sum + p.fGained + p.bonusF, 0),
-    [yesterdays],
-  );
   const totalF = useMemo(
     () =>
       yesterdays.reduce((sum, p) => sum + p.fGained + p.bonusF, 0),
     [yesterdays],
   );
 
+  const countsByTag = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const p of yesterdays) {
+      map.set(p.tag, (map.get(p.tag) ?? 0) + p.count);
+    }
+    return map;
+  }, [yesterdays]);
+
+  // Render one ladder per configured bonus that earned anything yesterday.
+  // Bonuses untouched yesterday stay hidden (avoids visual noise).
+  const activeBonuses = useMemo(
+    () =>
+      bonuses
+        .map((b) => {
+          const count = countsByTag.get(b.tagId) ?? 0;
+          const tag = tags.find((t) => t.id === b.tagId);
+          return { bonus: b, count, tag };
+        })
+        .filter((x) => x.count > 0),
+    [bonuses, countsByTag, tags],
+  );
+
   const hasData = totalPomos > 0;
-  const ladderTarget = Math.min(mathPomos, 11);
+  // Animation target: total reached ladder cells across all active
+  // bonuses, used to drive the staggered fill timer. We let each bonus
+  // light up its own cells in sequence by computing a flat total.
+  const ladderTarget = useMemo(
+    () =>
+      activeBonuses.reduce(
+        (sum, x) => sum + Math.min(x.count, ladderMaxCells(x.bonus, x.count)),
+        0,
+      ),
+    [activeBonuses],
+  );
 
   // Animation state — count-up driven by rAF; each ladder cell lights up
   // in sequence. Reset on every (re)open via `open` key.
@@ -378,15 +401,35 @@ function RecapStep({
               </div>
             </div>
 
-            <MathLadder current={mathPomos} filled={ladderFilled} />
+            {activeBonuses.length > 0 && (
+              <div className="mt-4 flex flex-col gap-3">
+                {(() => {
+                  let cellsConsumed = 0;
+                  return activeBonuses.map(({ bonus, count, tag }) => {
+                    const maxCells = ladderMaxCells(bonus, count);
+                    const cellsForThis = Math.min(count, maxCells);
+                    const litLocal = Math.max(
+                      0,
+                      Math.min(cellsForThis, ladderFilled - cellsConsumed),
+                    );
+                    cellsConsumed += cellsForThis;
+                    return (
+                      <BonusLadder
+                        key={bonus.id}
+                        bonus={bonus}
+                        tag={tag}
+                        count={count}
+                        filled={litLocal}
+                        maxCells={maxCells}
+                      />
+                    );
+                  });
+                })()}
+              </div>
+            )}
 
-            <div className="mt-3 flex items-center justify-between text-[12px] text-ink-3">
-              <span>
-                数学 <span className="font-mono tabular-nums text-ink-2">{mathPomos}</span>
-                {" · 含阶梯奖 "}
-                <span className="font-mono tabular-nums text-ink-2">+{mathF.toFixed(1)} F</span>
-              </span>
-              <span className="text-ink-mute">不重复入账</span>
+            <div className="mt-3 flex items-center justify-end text-[12px] text-ink-mute">
+              不重复入账
             </div>
           </>
         ) : (
@@ -451,38 +494,73 @@ function RecapStep({
   );
 }
 
-/** Math bonus ladder — 11 cells, milestones at 5/7/9/11. Reuses the
- *  visual vocabulary of Home's ProgressCard ladder but drives `filled`
- *  externally so RecapStep can animate cells lighting up in sequence. */
-function MathLadder({
-  current,
+/** How many ladder cells to render for one bonus given a count. Always
+ *  shows two tiers ahead of the current count so the next milestone is
+ *  visible. Capped at 30 to avoid unbounded growth on extreme days. */
+function ladderMaxCells(bonus: BonusConfig, count: number): number {
+  const headroom = Math.max(bonus.threshold + 2 * Math.max(bonus.step, 1), count + 2);
+  return Math.min(headroom, 30);
+}
+
+/** One bonus's ladder row inside the Recap step. Tag chip + count + bar
+ *  with milestones marked. `filled` is animated externally so the
+ *  count-up sequence lights cells across all bonuses in order. */
+function BonusLadder({
+  bonus,
+  tag,
+  count,
   filled,
+  maxCells,
 }: {
-  current: number;
+  bonus: BonusConfig;
+  tag: TagConfig | undefined;
+  count: number;
   filled: number;
+  maxCells: number;
 }) {
+  const tiers = enumerateTiers(bonus, count);
+  const milestoneSet = new Set(tiers.map((t) => t.pomos));
+  const fillBg = tag ? TAG_BG_CLASSES[tag.color] : "bg-ink";
+  const chipClass = tag
+    ? TAG_CHIP_CLASSES[tag.color]
+    : "border border-dashed border-rule text-ink-mute";
   return (
-    <div className="mt-4 flex gap-1">
-      {Array.from({ length: 11 }, (_, i) => i + 1).map((i) => {
-        const isMilestone = [5, 7, 9, 11].includes(i);
-        const lit = i <= filled;
-        const wouldBeLit = i <= current;
-        return (
-          <div
-            key={i}
-            className={cn(
-              "h-2 flex-1 rounded-sm transition-colors duration-300",
-              lit
-                ? "bg-tomato"
-                : isMilestone
-                  ? wouldBeLit
-                    ? "bg-gold-soft"
-                    : "bg-gold-soft/60"
-                  : "bg-ink/10",
-            )}
-          />
-        );
-      })}
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-baseline justify-between gap-2">
+        <span
+          className={cn(
+            "mono inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[11px]",
+            chipClass,
+          )}
+        >
+          {tag?.label ?? bonus.tagId}
+        </span>
+        <span className="font-mono tabular-nums text-[12px] text-ink-2">
+          {count} 番
+        </span>
+      </div>
+      <div className="flex gap-1">
+        {Array.from({ length: maxCells }, (_, i) => i + 1).map((i) => {
+          const isMilestone = milestoneSet.has(i);
+          const lit = i <= filled;
+          const wouldBeLit = i <= count;
+          return (
+            <div
+              key={i}
+              className={cn(
+                "h-2 flex-1 rounded-sm transition-colors duration-300",
+                lit
+                  ? fillBg
+                  : isMilestone
+                    ? wouldBeLit
+                      ? "bg-gold-soft"
+                      : "bg-gold-soft/60"
+                    : "bg-ink/10",
+              )}
+            />
+          );
+        })}
+      </div>
     </div>
   );
 }
