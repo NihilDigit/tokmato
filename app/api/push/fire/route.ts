@@ -87,7 +87,7 @@ export async function POST(request: Request) {
     kind === "running-end"
       ? {
           title: "番茄完成",
-          body: `第 ${count} 个番茄结束 · 进入 1 分钟缓冲`,
+          body: `第 ${count} 个番茄结束，进入 1 分钟缓冲`,
           tag: "tokmato-pomodoro",
         }
       : {

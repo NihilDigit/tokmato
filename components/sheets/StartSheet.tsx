@@ -140,9 +140,9 @@ export function StartSheet({
 
         {/* Tag — single select. */}
         <div>
-          <div className="smallcaps mb-2.5">Tag · 单选</div>
+          <div className="smallcaps mb-2.5">Tag</div>
           {tags.length === 0 ? (
-            <p className="text-sm text-ink-3">还没有 Tag · 到设置页新建一个。</p>
+            <p className="text-sm text-ink-3">还没有 Tag，到设置页新建一个。</p>
           ) : (
             <div
               className="flex flex-wrap gap-1.5"
@@ -177,7 +177,7 @@ export function StartSheet({
 
         {/* Type — input vs output. */}
         <div>
-          <div className="smallcaps mb-2.5">类型 · 决定 token 单价</div>
+          <div className="smallcaps mb-2.5">类型</div>
           <div
             className="grid grid-cols-2 gap-2.5"
             role="radiogroup"

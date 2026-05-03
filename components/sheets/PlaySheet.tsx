@@ -165,7 +165,7 @@ export function PlaySheet({
 
       {poolEmpty && (
         <p className="mt-3 text-[12px] text-ink-3">
-          时间池空了 · 先去番茄页攒一会儿
+          时间池空了，先去番茄页攒一会儿
         </p>
       )}
       {overBudget && !poolEmpty && (

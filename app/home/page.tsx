@@ -223,7 +223,7 @@ function nextBonusHint(bonus: BonusConfig, count: number): string {
     const left = bonus.threshold - count;
     return `再做 ${left} 个解锁 +${bonus.initialReward} F bonus`;
   }
-  if (bonus.step <= 0) return "本档已满 · 设置里加步长可继续外推";
+  if (bonus.step <= 0) return "本档已满，加步长可继续外推";
   // count >= threshold; find next tier = threshold + n*step where n is
   // the smallest integer making the tier > count.
   const passed = Math.floor((count - bonus.threshold) / bonus.step);

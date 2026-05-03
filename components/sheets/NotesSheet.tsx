@@ -133,13 +133,13 @@ export function NotesSheet({
       description={
         isEmpty
           ? undefined
-          : `${notes.length} 条 · 默认全部进 Inbox`
+          : `${notes.length} 条，默认全部进 Inbox`
       }
     >
       <div className="flex flex-col gap-6">
         {isEmpty ? (
           <p className="text-sm text-ink-3">
-            这串番茄没有闪过的想法 · 直接结束
+            这串番茄没有闪过的想法，直接结束
           </p>
         ) : (
           <ul className="flex flex-col gap-3">

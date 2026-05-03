@@ -67,7 +67,7 @@ const H_ITEMS: HItem[] = [
 
 const STEP_TITLES: Record<Step, { title: string; sub?: string }> = {
   1: { title: "昨日回顾" },
-  2: { title: "结算 · H (健康自控)" },
+  2: { title: "结算 H（健康自控）" },
   3: { title: "熬夜申报" },
   4: { title: "今日入账" },
 };
@@ -438,7 +438,7 @@ function RecapStep({
               昨日无番茄记录
             </div>
             <p className="mt-2 text-[12px] text-ink-mute">
-              新装或休息日 · 直接进下一步
+              新装或休息日，直接进下一步
             </p>
           </div>
         )}
@@ -714,7 +714,7 @@ function OvernightStep({
       <div className="border-t border-rule pt-3 text-[12px] text-ink-3">
         每 1h <span className="font-mono text-plum">−2 H</span>
         <span className="mx-2 text-ink-mute">·</span>
-        最多抵消今日 H 收益 · 不会让 H 总余额变负
+        最多抵消今日 H 收益，不会让总余额变负
         {cappedAtRaw && (
           <span className="ml-2 text-ink-mute">
             （滑到 {overnightH}h 名义 −{wouldBeLoss}，实际抵消 −{effectiveLoss}）
@@ -758,11 +758,11 @@ function SummaryStep({
       </div>
 
       <dl className="flex flex-col gap-2 text-[13px]">
-        <Row label="F · 番茄外产出" value={`+${fGained.toFixed(1)}`} tone="tomato" />
-        <Row label="H · 健康基础分" value={`+${hRaw.toFixed(1)}`} tone="sage" />
+        <Row label="番茄外产出 (F)" value={`+${fGained.toFixed(1)}`} tone="tomato" />
+        <Row label="健康基础分 (H)" value={`+${hRaw.toFixed(1)}`} tone="sage" />
         {effectiveOvernightLoss > 0 && (
           <Row
-            label="H · 熬夜抵消"
+            label="熬夜抵消 (H)"
             value={`−${effectiveOvernightLoss.toFixed(1)}`}
             tone="plum"
           />

@@ -138,7 +138,7 @@ export function FoodSheet({
         <div className="mt-5">
           {presets.length === 0 ? (
             <p className="py-6 text-center text-[13px] text-ink-3">
-              还没有常用项 · 点&ldquo;编辑&rdquo;添加
+              还没有常用项，点&ldquo;编辑&rdquo;添加
             </p>
           ) : (
             <ul className="grid grid-cols-2 gap-2.5">

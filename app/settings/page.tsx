@@ -108,18 +108,18 @@ export default function SettingsPage() {
       const sub = await enablePush();
       if (sub) {
         setPushOn(true);
-        setPushMsg("已开启 · 浏览器关掉也能收到");
+        setPushMsg("已开启");
       } else {
         const perm = getPermission();
         setPushMsg(
           perm === "denied"
-            ? "权限被拒 · 去浏览器站点设置里改"
+            ? "权限被拒，到浏览器站点设置里开"
             : "未授予权限"
         );
       }
     } catch (e) {
       console.error("[settings] enablePush failed", e);
-      setPushMsg("开启失败 · 看 console");
+      setPushMsg("开启失败");
     } finally {
       setPushBusy(false);
     }
@@ -134,7 +134,7 @@ export default function SettingsPage() {
       setPushMsg("已关闭");
     } catch (e) {
       console.error("[settings] disablePush failed", e);
-      setPushMsg("关闭失败 · 看 console");
+      setPushMsg("关闭失败");
     } finally {
       setPushBusy(false);
     }
@@ -148,7 +148,7 @@ export default function SettingsPage() {
       const res = await saveToCloud(snapshot);
       useStore.getState().markSynced(res.savedAt);
       setSyncStatus("ok");
-      setSyncMsg(`已推送 · ${fmtSyncTime(res.savedAt)}`);
+      setSyncMsg(`已推送 ${fmtSyncTime(res.savedAt)}`);
     } catch (e) {
       console.error("[settings] saveToCloud failed", e);
       setSyncStatus("err");
@@ -156,15 +156,15 @@ export default function SettingsPage() {
       // emitted by `SyncError` so we can give actionable hints.
       const msg = e instanceof Error ? e.message : "";
       if (msg.includes("UNAUTHENTICATED")) {
-        setSyncMsg("会话过期 · 重新登录");
+        setSyncMsg("会话过期，请重新登录");
       } else if (msg.includes("PAYLOAD_TOO_LARGE")) {
-        setSyncMsg("数据过大 · 先清理历史再试");
+        setSyncMsg("数据过大，先清理历史");
       } else if (msg.includes("INVALID_PAYLOAD")) {
-        setSyncMsg("数据格式异常 · 看 console");
+        setSyncMsg("数据格式异常");
       } else if (msg.includes("RATE_LIMITED")) {
-        setSyncMsg("操作过于频繁 · 稍后再试");
+        setSyncMsg("操作过于频繁，稍后再试");
       } else {
-        setSyncMsg("推送失败 · 看 console");
+        setSyncMsg("推送失败");
       }
     }
   };
@@ -187,11 +187,11 @@ export default function SettingsPage() {
           data.savedAt,
         );
       setSyncStatus("ok");
-      setSyncMsg(`已拉取 · ${fmtSyncTime(data.savedAt)}`);
+      setSyncMsg(`已拉取 ${fmtSyncTime(data.savedAt)}`);
     } catch (e) {
       console.error("[settings] loadFromCloud failed", e);
       setSyncStatus("err");
-      setSyncMsg("拉取失败 · 看 console");
+      setSyncMsg("拉取失败");
     }
   };
 
@@ -213,7 +213,7 @@ export default function SettingsPage() {
       URL.revokeObjectURL(url);
     } catch (e) {
       console.error("[settings] export failed", e);
-      alert("导出失败 · 看 console");
+      alert("导出失败");
     }
   };
 
@@ -377,7 +377,7 @@ export default function SettingsPage() {
               title={pushOn ? "关闭推送" : "开启推送"}
               sub={
                 pushOn
-                  ? "番茄结束 / 缓冲结束的提醒走系统通知 · 即使关掉浏览器也能响"
+                  ? "番茄/缓冲结束走系统通知，关闭浏览器也能收到"
                   : "授权后浏览器关掉也能收到番茄到点提醒"
               }
               destructive={pushOn}
@@ -537,13 +537,13 @@ export default function SettingsPage() {
           <GhostRow
             Icon={Download}
             title="导出全部记录"
-            sub="下载 JSON 文件 · 含 token 余额、wishlist、kanban、番茄串"
+            sub="JSON 文件，含 token 余额、wishlist、kanban、番茄串"
             onClick={exportJson}
           />
           <GhostRow
             Icon={Trash2}
             title="清空本地数据"
-            sub="清空记录 · 登录后静默发 +5 F / +10 H"
+            sub="清空 token 余额、历史、看板、wishlist；保留同步配置"
             destructive
             onClick={clearCache}
           />
@@ -734,7 +734,7 @@ function CloudSync({
         <div className="flex flex-col gap-0.5">
           <span className="smallcaps text-ink-2">自动同步</span>
           <span className="text-xs text-ink-3">
-            余额变化 2 秒后自动推 · 打开应用时自动拉取较新版本
+            余额变化 2 秒后自动推，打开应用时自动拉取较新版本
           </span>
         </div>
         <span className="mono text-xs text-ink-3 whitespace-nowrap">

@@ -30,7 +30,7 @@ const COLS: Col[] = [
     id: "inbox",
     shortLabel: "Inbox",
     label: "Inbox",
-    sub: "未分类 · 从便签流入",
+    sub: "未分类",
     dot: "bg-ink-mute",
     text: "text-ink-mute",
     border: "border-ink-mute/40",
@@ -50,7 +50,7 @@ const COLS: Col[] = [
     id: "Q2",
     shortLabel: "Q2",
     label: "Q2 长期投资",
-    sub: "重要 + 不紧急 · 真正的人生增量",
+    sub: "重要 + 不紧急",
     dot: "bg-sage",
     text: "text-sage",
     border: "border-sage/50",
@@ -60,7 +60,7 @@ const COLS: Col[] = [
     id: "Q3",
     shortLabel: "Q3",
     label: "Q3 不可避免杂事",
-    sub: "不重要 + 紧急 · 压缩它",
+    sub: "不重要 + 紧急",
     dot: "bg-plum",
     text: "text-plum",
     border: "border-plum/50",
@@ -70,7 +70,7 @@ const COLS: Col[] = [
     id: "Q4",
     shortLabel: "Q4",
     label: "Q4 精神维护",
-    sub: "不重要 + 不紧急 · 续命",
+    sub: "不重要 + 不紧急",
     dot: "bg-gold",
     text: "text-gold",
     border: "border-gold/50",
@@ -246,7 +246,7 @@ export default function KanbanPage() {
             + 新任务
           </button>
           <p className="mt-2 text-[11px] leading-relaxed text-ink-mute">
-            长按卡片 · 上下左右选目标象限
+            长按卡片，上下左右选目标象限
           </p>
         </section>
       </div>
@@ -616,7 +616,7 @@ function RadialMoveMenu({
       ? "拉向方向"
       : active === fromCol
         ? "已在此列"
-        : `松手 → ${COL_BY_ID[active].shortLabel} · ${COL_BY_ID[active].sub.split(" · ")[0]}`;
+        : `松手 → ${COL_BY_ID[active].shortLabel} · ${COL_BY_ID[active].sub}`;
 
   return (
     <div
@@ -743,7 +743,7 @@ function RadialMoveMenu({
                     : "text-ink-3"
               )}
             >
-              {col.id === "inbox" ? "未分类" : col.sub.split(" · ")[0]}
+              {col.sub}
             </span>
           </div>
         );

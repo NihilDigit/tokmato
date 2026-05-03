@@ -249,7 +249,7 @@ export default function JourneyPage() {
       {/* Recent strings */}
       <section className="flex flex-col gap-4">
         <SectionHead
-          kicker="最近番茄串 · 仅显示 20 条"
+          kicker="最近 20 串"
           title="脚印"
           right={
             <button

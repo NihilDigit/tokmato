@@ -105,7 +105,7 @@ export function AddKanbanSheet({
         </div>
 
         <div>
-          <div className="smallcaps mb-2">下一步 · 选填</div>
+          <div className="smallcaps mb-2">下一步（选填）</div>
           <input
             value={next}
             onChange={(e) => setNext(e.target.value)}

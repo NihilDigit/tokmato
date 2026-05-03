@@ -294,7 +294,7 @@ export function PoolSheet({
 
       {empty && (
         <p className="mt-3 text-[12px] text-ink-3">
-          {token === "F" ? "FToken" : "HToken"} 余额为 0 · {token === "F" ? "去番茄页攒一会儿" : "去结算页打个 H 的卡"}
+          {token === "F" ? "FToken" : "HToken"} 余额为 0，{token === "F" ? "去番茄页攒一会儿" : "去结算页打个 H 的卡"}
         </p>
       )}
       {overBudget && !empty && (
