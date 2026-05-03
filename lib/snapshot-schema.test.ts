@@ -28,6 +28,9 @@ function validSnapshot() {
     todayHGained: 0,
     todayPoolGained: 0,
     welcomeGrantedUserIds: [],
+    todayCountsByTag: {},
+    tags: [],
+    bonuses: [],
     lastSavedAt: 0,
     pomodoroHistory: [],
     tokenHistory: [],
@@ -106,11 +109,11 @@ describe("persistedSnapshotSchema — strictness", () => {
     expect(persistedSnapshotSchema.safeParse(snap).success).toBe(true);
   });
 
-  it("rejects an invalid tagId", () => {
+  it("rejects an empty tagId (v6→v7 widened the enum to a bounded string)", () => {
     const snap = validSnapshot();
     snap.session = {
       task: "刷题",
-      tag: "history" as never, // not in the enum
+      tag: "" as never, // empty string fails the min(1) cap
       type: "input",
       startedAt: 1,
       phaseStartedAt: 1,
@@ -119,6 +122,21 @@ describe("persistedSnapshotSchema — strictness", () => {
       notes: [],
     } as never;
     expect(persistedSnapshotSchema.safeParse(snap).success).toBe(false);
+  });
+
+  it("accepts a user-defined tagId outside the legacy 5-tag set", () => {
+    const snap = validSnapshot();
+    snap.session = {
+      task: "复习",
+      tag: "physics" as never, // not one of cs/math/english/others/trash
+      type: "input",
+      startedAt: 1,
+      phaseStartedAt: 1,
+      count: 1,
+      mode: "running",
+      notes: [],
+    } as never;
+    expect(persistedSnapshotSchema.safeParse(snap).success).toBe(true);
   });
 
   it("rejects malformed dayKey on activeDay", () => {

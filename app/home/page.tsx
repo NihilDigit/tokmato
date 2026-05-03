@@ -23,7 +23,10 @@ export default function HomePage() {
   const htoken = useStore((s) => s.htoken);
   const timePool = useStore((s) => s.timePool);
   const todayPomos = useStore((s) => s.todayPomos);
-  const todayMath = useStore((s) => s.todayMathPomos);
+  // v1.8: math counter is one entry in todayCountsByTag. The hint logic
+  // in nextMathBonusHint still hardcodes the 5/7/9/11 ladder; Phase B
+  // will rewrite Home's bonus hints to read from BonusConfig.
+  const todayMath = useStore((s) => s.todayCountsByTag.math ?? 0);
   const todayFGained = useStore((s) => s.todayFGained);
   const todayHGained = useStore((s) => s.todayHGained);
   const todayPoolGained = useStore((s) => s.todayPoolGained);

@@ -63,7 +63,9 @@ describeIf("active-session server actions (real Redis)", async () => {
   });
 
   it("INVALID_PAYLOAD on a malformed marker, no write", async () => {
-    const bad = { ...validMarker(), tag: "history" } as never;
+    // v6→v7 widened tagId to a bounded string; use a structural break
+    // (negative count) to trigger validation rejection.
+    const bad = { ...validMarker(), count: -1 } as never;
     await expect(setActiveSession(bad)).rejects.toThrow("INVALID_PAYLOAD");
     expect(await redis!.get(key)).toBeNull();
   });

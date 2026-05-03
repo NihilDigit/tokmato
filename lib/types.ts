@@ -1,13 +1,47 @@
 // tokmato — shared domain types
 // Derived from legacy/tokmato.html state.jsx initialState.
 
-export type TagId = "cs" | "math" | "english" | "others" | "trash";
+/** Tag id is now user-extensible. Stored as a string for forward compat
+ *  (history records keep their original id even if a tag is later deleted
+ *  or renamed). The alias is documentation-only — no branded type. */
+export type TagId = string;
 
-export interface Tag {
+/** Fixed 10-color palette for tag chips. Stored as a token; the runtime
+ *  mapping to bg/text Tailwind classes lives in `lib/tag-colors.ts`. */
+export const TAG_COLORS = [
+  "tomato",
+  "sage",
+  "teal",
+  "gold",
+  "plum",
+  "ocean",
+  "moss",
+  "amber",
+  "rose",
+  "slate",
+] as const;
+export type TagColor = (typeof TAG_COLORS)[number];
+
+/** User-configurable tag definition. `id` is immutable (referenced by
+ *  pomodoroHistory, tokenHistory, BonusConfig). `label` and `color` can
+ *  be edited freely. */
+export interface TagConfig {
   id: TagId;
   label: string;
-  color: string;
-  bg: string;
+  color: TagColor;
+}
+
+/** A single bonus rule attached to one tag. Tier ladder is open-ended:
+ *  - tier 0 fires at `threshold` pomodoros, awarding `initialReward` F.
+ *  - tier n>=1 fires at `threshold + n*step` pomos, awarding `stepReward` F.
+ *  No upper cap — extrapolated infinitely. */
+export interface BonusConfig {
+  id: string;
+  tagId: TagId;
+  threshold: number;
+  initialReward: number;
+  step: number;
+  stepReward: number;
 }
 
 export type SessionType = "input" | "output";
@@ -103,12 +137,20 @@ export interface UserState {
   playSession: PlaySession | null;
 
   // Today snapshot
-  todayMathPomos: number;
   todayPomos: number;
+  /** Per-tag pomodoro count for the active day. Replaces the v6
+   *  `todayMathPomos` slot — generalized so any bonus-bearing tag has
+   *  its running count tracked. Reset by `normalizeDay` on day-roll.
+   *  Tags with zero today are simply absent from the record. */
+  todayCountsByTag: Record<TagId, number>;
   todayFGained: number;
   todayHGained: number;
   todayPoolGained: number;
   welcomeGrantedUserIds: string[];
+
+  // Configurable rules
+  tags: TagConfig[];
+  bonuses: BonusConfig[];
 
   /**
    * Local clock value of the most recent successful saveToCloud (or the

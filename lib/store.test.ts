@@ -186,7 +186,7 @@ describe("ensureToday", () => {
     useStore.setState({
       activeDay: "2026-01-01",
       todayPomos: 4,
-      todayMathPomos: 2,
+      todayCountsByTag: { math: 2, cs: 1 },
       todayFGained: 3,
       todayHGained: 1,
       todayPoolGained: 30,
@@ -198,7 +198,7 @@ describe("ensureToday", () => {
     s().ensureToday();
     expect(s().activeDay).toBe(todayKey());
     expect(s().todayPomos).toBe(0);
-    expect(s().todayMathPomos).toBe(0);
+    expect(s().todayCountsByTag).toEqual({});
     expect(s().todayFGained).toBe(0);
     expect(s().todayHGained).toBe(0);
     expect(s().todayPoolGained).toBe(0);
@@ -282,17 +282,17 @@ describe("endSession", () => {
   });
 
   it("math tag crossing 5 milestone (4→6) awards +1 bonus", () => {
-    // Pre-seed: bring todayMathPomos to 4 by ending an input math session.
+    // Pre-seed: bring todayCountsByTag.math to 4 by ending an input math session.
     s().startSession({ task: "高数", tag: "math", type: "input" });
     s().endSession({ completedCount: 4 });
     // ftoken so far: 4 (input math, no milestone crossed: 4 < 5 → bonus 0)
-    expect(s().todayMathPomos).toBe(4);
+    expect((s().todayCountsByTag.math ?? 0)).toBe(4);
     expect(s().ftoken).toBe(4);
 
     // Now do another 2 pomos → math goes 4 → 6, crossing milestone 5.
     s().startSession({ task: "高数", tag: "math", type: "input" });
     s().endSession({ completedCount: 2 });
-    expect(s().todayMathPomos).toBe(6);
+    expect((s().todayCountsByTag.math ?? 0)).toBe(6);
     // +2 base (input) + 1 bonus = +3
     expect(s().ftoken).toBe(4 + 3);
     const lastRecord = s().pomodoroHistory[0];
@@ -303,11 +303,11 @@ describe("endSession", () => {
   it("math tag crossing 5 AND 7 milestones (4→7) awards +2 bonus", () => {
     s().startSession({ task: "高数", tag: "math", type: "input" });
     s().endSession({ completedCount: 4 });
-    expect(s().todayMathPomos).toBe(4);
+    expect((s().todayCountsByTag.math ?? 0)).toBe(4);
 
     s().startSession({ task: "高数", tag: "math", type: "input" });
     s().endSession({ completedCount: 3 });
-    expect(s().todayMathPomos).toBe(7);
+    expect((s().todayCountsByTag.math ?? 0)).toBe(7);
     // base 4 + base 3 = 7, plus 2 bonus
     expect(s().ftoken).toBe(7 + 2);
     expect(s().pomodoroHistory[0].bonusF).toBe(2);
@@ -324,14 +324,14 @@ describe("endSession", () => {
     // For each milestone m: 5 < m && m <= 6 → only m === 6, which isn't a milestone.
     s().startSession({ task: "高数", tag: "math", type: "input" });
     s().endSession({ completedCount: 1 });
-    expect(s().todayMathPomos).toBe(6);
+    expect((s().todayCountsByTag.math ?? 0)).toBe(6);
     expect(s().pomodoroHistory[0].bonusF).toBe(0);
   });
 
   it("non-math tag earns no milestone bonus even at high pomo counts", () => {
     s().startSession({ task: "刷英语", tag: "english", type: "input" });
     s().endSession({ completedCount: 6 });
-    expect(s().todayMathPomos).toBe(0);
+    expect((s().todayCountsByTag.math ?? 0)).toBe(0);
     expect(s().pomodoroHistory[0].bonusF).toBe(0);
     expect(s().ftoken).toBe(6);
   });

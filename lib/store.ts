@@ -21,16 +21,45 @@ import type {
   PlayType,
   FoodPreset,
   TagId,
+  TagConfig,
+  TagColor,
+  BonusConfig,
   SessionType,
   PomodoroRecord,
   TokenLedgerEntry,
 } from "./types";
+import { totalBonusF } from "./bonus";
 
 // ─────────────────────────────────────────────────────────────────────────
 // Defaults — first-run starter state; once user has data in storage, this is unused.
 // ─────────────────────────────────────────────────────────────────────────
 const WELCOME_FTOKEN = 5;
 const WELCOME_HTOKEN = 10;
+
+/** Default tag set — matches the v1.7 hardcoded list, with one color
+ *  assigned per tag from the 10-color palette. Preserved on migration
+ *  so existing histories (which reference tag ids by string) keep working. */
+const DEFAULT_TAGS: TagConfig[] = [
+  { id: "cs", label: "#cs", color: "slate" },
+  { id: "math", label: "#math", color: "tomato" },
+  { id: "english", label: "#english", color: "sage" },
+  { id: "others", label: "#others", color: "gold" },
+  { id: "trash", label: "#trash", color: "plum" },
+];
+
+/** Default bonus set — replicates the v1.7 hardcoded math 5/7/9/11
+ *  ladder (threshold 5, step 2, +1 F per tier), now extrapolated past 11
+ *  per the v1.8 unbounded design. */
+const DEFAULT_BONUSES: BonusConfig[] = [
+  {
+    id: "b-default-math",
+    tagId: "math",
+    threshold: 5,
+    initialReward: 1,
+    step: 2,
+    stepReward: 1,
+  },
+];
 
 function createStarterState(): UserState {
   return {
@@ -41,12 +70,14 @@ function createStarterState(): UserState {
     activeDay: todayKey(),
     session: null,
     playSession: null,
-    todayMathPomos: 0,
     todayPomos: 0,
+    todayCountsByTag: {},
     todayFGained: 0,
     todayHGained: 0,
     todayPoolGained: 0,
     welcomeGrantedUserIds: [],
+    tags: DEFAULT_TAGS.map((t) => ({ ...t })),
+    bonuses: DEFAULT_BONUSES.map((b) => ({ ...b })),
     lastSavedAt: 0,
     pomodoroHistory: [],
     tokenHistory: [],
@@ -105,7 +136,7 @@ function normalizeDay(s: Store): Partial<UserState> {
     return {
       activeDay: nextDay,
       todayPomos: 0,
-      todayMathPomos: 0,
+      todayCountsByTag: {},
       todayFGained: 0,
       todayHGained: 0,
       todayPoolGained: 0,
@@ -115,7 +146,7 @@ function normalizeDay(s: Store): Partial<UserState> {
   return {
     activeDay: nextDay,
     todayPomos: 0,
-    todayMathPomos: 0,
+    todayCountsByTag: {},
     todayFGained: 0,
     todayHGained: 0,
     todayPoolGained: 0,
@@ -176,6 +207,16 @@ interface StoreActions {
   addFoodPreset: (preset: Omit<FoodPreset, "id">) => void;
   updateFoodPreset: (id: string, patch: Partial<Omit<FoodPreset, "id">>) => void;
   removeFoodPreset: (id: string) => void;
+
+  // Tags (editable; id immutable, label/color editable; hard delete)
+  addTag: (data: { label: string; color: TagColor }) => void;
+  updateTag: (id: TagId, patch: Partial<Pick<TagConfig, "label" | "color">>) => void;
+  removeTag: (id: TagId) => void;
+
+  // Bonuses (editable list of tier rules)
+  addBonus: (data: Omit<BonusConfig, "id">) => void;
+  updateBonus: (id: string, patch: Partial<Omit<BonusConfig, "id">>) => void;
+  removeBonus: (id: string) => void;
 
   // Internal helpers
   reset: () => void;
@@ -367,22 +408,21 @@ export const useStore = create<Store>()(
           if (!s.session) return s;
           const daily = normalizeDay(s);
           const baseTodayPomos = daily.todayPomos ?? s.todayPomos;
-          const baseTodayMath = daily.todayMathPomos ?? s.todayMathPomos;
+          const baseCountsByTag =
+            daily.todayCountsByTag ?? s.todayCountsByTag ?? {};
+          const tagId = s.session.tag;
+          const baseTagCount = baseCountsByTag[tagId] ?? 0;
           const baseTodayF = daily.todayFGained ?? s.todayFGained ?? 0;
           const isInput = s.session.type === "input";
-          const isMath = s.session.tag === "math";
           const completedCount = Math.max(0, data?.completedCount ?? s.session.count);
           const fGain = (isInput ? 1 : 0.5) * completedCount;
           const newTodayPomos = baseTodayPomos + completedCount;
-          const newTodayMath = isMath ? baseTodayMath + completedCount : baseTodayMath;
-          // Math BONUS: hitting 5/7/9/11 #math pomos in a day awards
-          // an extra +1F (per ladder visualized on Home).
-          const MATH_MILESTONES = [5, 7, 9, 11];
-          const bonusF = isMath
-            ? MATH_MILESTONES.filter(
-                (m) => baseTodayMath < m && m <= newTodayMath
-              ).length
-            : 0;
+          const newTagCount = baseTagCount + completedCount;
+          // Tag BONUS: sum of crossed-tier rewards across every bonus
+          // attached to this tag. Replaces v1.7's hardcoded math 5/7/9/11
+          // ladder; default seed bonus replicates the same behavior up to
+          // tier 3 and extrapolates past it.
+          const bonusF = totalBonusF(s.bonuses, tagId, baseTagCount, newTagCount);
           const totalFGain = fGain + bonusF;
           // Update recents
           const taskName = s.session.task;
@@ -420,7 +460,7 @@ export const useStore = create<Store>()(
             ...daily,
             session: null,
             todayPomos: newTodayPomos,
-            todayMathPomos: newTodayMath,
+            todayCountsByTag: { ...baseCountsByTag, [tagId]: newTagCount },
             todayFGained: round(baseTodayF + totalFGain),
             ftoken: round(s.ftoken + totalFGain),
             pomodoroHistory: record
@@ -481,6 +521,62 @@ export const useStore = create<Store>()(
           foodPresets: s.foodPresets.filter((p) => p.id !== id),
         })),
 
+      addTag: ({ label, color }) =>
+        set((s) => {
+          const trimmed = label.trim();
+          if (!trimmed) return s;
+          // id derived from a timestamp so it's stable but unique. Label can
+          // change later without breaking history (which references id).
+          const id = `t-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+          return { tags: [...s.tags, { id, label: trimmed, color }] };
+        }),
+
+      updateTag: (id, patch) =>
+        set((s) => ({
+          tags: s.tags.map((t) =>
+            t.id === id
+              ? {
+                  ...t,
+                  ...(patch.label !== undefined
+                    ? { label: patch.label.trim() || t.label }
+                    : {}),
+                  ...(patch.color !== undefined ? { color: patch.color } : {}),
+                }
+              : t,
+          ),
+        })),
+
+      removeTag: (id) =>
+        set((s) => ({
+          // Hard delete: history records that referenced this id keep the
+          // string; UI renders unknown ids as plain text without a chip color.
+          // Bonuses attached to this tag are dropped as well.
+          tags: s.tags.filter((t) => t.id !== id),
+          bonuses: s.bonuses.filter((b) => b.tagId !== id),
+        })),
+
+      addBonus: ({ tagId, threshold, initialReward, step, stepReward }) =>
+        set((s) => {
+          if (!s.tags.some((t) => t.id === tagId)) return s;
+          const id = `b-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+          return {
+            bonuses: [
+              ...s.bonuses,
+              { id, tagId, threshold, initialReward, step, stepReward },
+            ],
+          };
+        }),
+
+      updateBonus: (id, patch) =>
+        set((s) => ({
+          bonuses: s.bonuses.map((b) => (b.id === id ? { ...b, ...patch } : b)),
+        })),
+
+      removeBonus: (id) =>
+        set((s) => ({
+          bonuses: s.bonuses.filter((b) => b.id !== id),
+        })),
+
       addWish: ({ name, price, pay, why }) =>
         set((s) => ({
           ...normalizeDay(s),
@@ -526,7 +622,7 @@ export const useStore = create<Store>()(
     },
     {
       name: "tokmato:state",
-      version: 6,
+      version: 7,
       // v1 → v2: replace single-slot welcomeGrantUserId with an array so
       // alternating accounts on the same device can't farm welcome bonuses.
       // v2 → v3: add session.phaseStartedAt for clock-based timer.
@@ -539,6 +635,11 @@ export const useStore = create<Store>()(
       //          devices with welcomeGrantedUserIds (or the v5 array)
       //          are flagged "seen" so the guide doesn't pop on users
       //          who've already been using the app.
+      // v6 → v7: configurable tags + bonuses. Drop todayMathPomos in
+      //          favor of todayCountsByTag (per-tag counter). Seed tags
+      //          and bonuses with the v1.7 defaults so existing users
+      //          see the same tag list and the same math 5/7/9/11
+      //          ladder behavior (now extrapolated past 11).
       migrate: (persistedState, version) => {
         if (!persistedState || typeof persistedState !== "object") {
           return persistedState as Partial<UserState>;
@@ -574,6 +675,27 @@ export const useStore = create<Store>()(
           }
           delete state.guideSeenUserIds;
         }
+        if (version < 7) {
+          // Move todayMathPomos counter into the new generic shape, then
+          // drop the legacy field.
+          const legacyMath = state.todayMathPomos;
+          const counts =
+            (state.todayCountsByTag as Record<string, number> | undefined) ?? {};
+          if (typeof legacyMath === "number" && legacyMath > 0) {
+            counts.math = legacyMath;
+          }
+          state.todayCountsByTag = counts;
+          delete state.todayMathPomos;
+          // Seed tags / bonuses if absent. Existing users get the v1.7
+          // hardcoded defaults so the UI doesn't appear empty after the
+          // bump; new users get the same via createStarterState.
+          if (!Array.isArray(state.tags) || state.tags.length === 0) {
+            state.tags = DEFAULT_TAGS.map((t) => ({ ...t }));
+          }
+          if (!Array.isArray(state.bonuses) || state.bonuses.length === 0) {
+            state.bonuses = DEFAULT_BONUSES.map((b) => ({ ...b }));
+          }
+        }
         return state as Partial<UserState>;
       },
       // Skip auto-hydrate so SSR and the very first client render both
@@ -603,12 +725,14 @@ export function selectSnapshot(s: UserState): Partial<UserState> {
     activeDay: s.activeDay,
     session: s.session,
     playSession: s.playSession,
-    todayMathPomos: s.todayMathPomos,
     todayPomos: s.todayPomos,
+    todayCountsByTag: s.todayCountsByTag,
     todayFGained: s.todayFGained,
     todayHGained: s.todayHGained,
     todayPoolGained: s.todayPoolGained,
     welcomeGrantedUserIds: s.welcomeGrantedUserIds,
+    tags: s.tags,
+    bonuses: s.bonuses,
     lastSavedAt: s.lastSavedAt,
     pomodoroHistory: s.pomodoroHistory,
     tokenHistory: s.tokenHistory,

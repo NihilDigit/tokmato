@@ -24,7 +24,10 @@ import { z } from "zod";
 
 const ACTIVE_TTL_SECONDS = 30 * 60;
 
-const tagId = z.enum(["cs", "math", "english", "others", "trash"]);
+// v6→v7: tag id is user-extensible. Validate as a bounded non-empty
+// string; the cross-device awareness marker only mirrors what the local
+// session has, so any string the local store accepts should round-trip.
+const tagId = z.string().min(1).max(200);
 const sessionType = z.enum(["input", "output"]);
 const sessionMode = z.enum(["running", "buffer"]);
 

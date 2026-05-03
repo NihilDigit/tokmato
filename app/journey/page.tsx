@@ -34,7 +34,10 @@ const HEATMAP_TONE: Record<TagId, string> = {
   trash: "bg-plum",
 };
 
-const TAG_BAR: Record<Exclude<TagId, "all">, string> = {
+// Phase B (v1.8) will replace these with reads from useStore().tags;
+// for the data-layer-compatibility cut, accept any tag id (history may
+// reference archived ids) and fall back to neutral styling.
+const TAG_BAR: Record<string, string> = {
   cs: "bg-ink",
   math: "bg-tomato",
   english: "bg-sage",
@@ -42,7 +45,7 @@ const TAG_BAR: Record<Exclude<TagId, "all">, string> = {
   trash: "bg-plum",
 };
 
-const TAG_CHIP: Record<Exclude<TagId, "all">, string> = {
+const TAG_CHIP: Record<string, string> = {
   cs: "bg-paper-2 text-ink",
   math: "bg-tomato text-white",
   english: "bg-sage text-white",
@@ -50,7 +53,7 @@ const TAG_CHIP: Record<Exclude<TagId, "all">, string> = {
   trash: "bg-plum text-white",
 };
 
-const TAG_LABEL: Record<Exclude<TagId, "all">, string> = {
+const TAG_LABEL: Record<string, string> = {
   cs: "#cs",
   math: "#math",
   english: "#english",
@@ -99,16 +102,19 @@ export default function JourneyPage() {
         { tag: "trash", pct: 0 },
       ];
     }
-    const counts = recentRecords.reduce(
-      (acc, r) => {
-        acc[r.tag] += r.count;
+    // Phase B (v1.8) will rewrite distribution to enumerate the
+    // user's configured tags. For now keep the legacy 5-tag shape but
+    // accept any tag id from history (records may carry archived ids).
+    const counts: Record<string, number> = recentRecords.reduce(
+      (acc: Record<string, number>, r) => {
+        acc[r.tag] = (acc[r.tag] ?? 0) + r.count;
         return acc;
       },
-      { cs: 0, math: 0, english: 0, others: 0, trash: 0 },
+      {},
     );
     return (["math", "cs", "english", "others", "trash"] as const).map((tag) => ({
       tag,
-      pct: Math.round((counts[tag] / total) * 100),
+      pct: Math.round(((counts[tag] ?? 0) / total) * 100),
     }));
   }, [recentRecords]);
 

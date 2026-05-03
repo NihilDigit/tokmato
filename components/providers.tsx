@@ -186,7 +186,7 @@ function balanceSignature(s: ReturnType<typeof useStore.getState>): string {
     s.timePool,
     s.lastSettledDate ?? "",
     s.todayPomos,
-    s.todayMathPomos,
+    JSON.stringify(s.todayCountsByTag),
     s.tokenHistory.length,
     s.pomodoroHistory.length,
     s.wishlist.length,

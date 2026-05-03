@@ -22,10 +22,26 @@ const ARR_SMALL = 200;
 const ARR_MED = 1_000;
 const ARR_LARGE = 2_000;
 
-const tagId = z.enum(["cs", "math", "english", "others", "trash"]);
+// Tag id is now user-extensible (v6→v7); historical records still hold
+// the original 5 string ids ("cs"/"math"/...). Validate as a bounded
+// non-empty string so a tampered client can't bloat KV.
+const tagId = z.string().min(1).max(STR_SHORT);
+const tagColor = z.enum([
+  "tomato",
+  "sage",
+  "teal",
+  "gold",
+  "plum",
+  "ocean",
+  "moss",
+  "amber",
+  "rose",
+  "slate",
+]);
 const sessionType = z.enum(["input", "output"]);
 const sessionMode = z.enum(["running", "buffer"]);
 const playType = z.enum(["active", "passive"]);
+
 const dayKey = z
   .string()
   .max(STR_SHORT)
@@ -39,6 +55,21 @@ const minuteAmount = finiteNumber.min(-100_000).max(100_000);
 const epochMs = finiteNumber.int().min(0).max(8_640_000_000_000_000);
 
 const id = z.string().min(1).max(STR_SHORT);
+
+const tagConfig = z.object({
+  id: tagId,
+  label: z.string().min(1).max(STR_MED),
+  color: tagColor,
+});
+
+const bonusConfig = z.object({
+  id,
+  tagId,
+  threshold: finiteNumber.min(0).max(10_000),
+  initialReward: tokenAmount,
+  step: finiteNumber.min(0).max(10_000),
+  stepReward: tokenAmount,
+});
 
 const pomodoroSession = z.object({
   task: z.string().max(STR_MED),
@@ -135,8 +166,10 @@ export const persistedSnapshotSchema = z
     activeDay: dayKey,
     session: pomodoroSession.nullable(),
     playSession: playSession.nullable(),
-    todayMathPomos: safeInt,
     todayPomos: safeInt,
+    /** Per-tag pomodoro counter for the active day. Replaces v1.7
+     *  todayMathPomos. Keys are tag ids (strings); values are counts. */
+    todayCountsByTag: z.record(tagId, safeInt),
     todayFGained: tokenAmount,
     todayHGained: tokenAmount,
     todayPoolGained: minuteAmount,
@@ -145,6 +178,14 @@ export const persistedSnapshotSchema = z
     // to a localStorage flag and stops emitting this key. Kept optional
     // so cloud reads from older clients still pass the strict gate.
     guideSeenUserIds: z.array(z.string().max(STR_SHORT)).max(ARR_SMALL).optional(),
+    // v1.7 stored todayMathPomos as a fixed slot. v1.8 generalized it to
+    // todayCountsByTag — kept optional so cloud reads from older clients
+    // still pass strict.
+    todayMathPomos: safeInt.optional(),
+    /** User-configurable tag list (v1.8+). */
+    tags: z.array(tagConfig).max(ARR_SMALL),
+    /** User-configurable bonus tier rules (v1.8+). */
+    bonuses: z.array(bonusConfig).max(ARR_SMALL),
     lastSavedAt: epochMs,
     pomodoroHistory: z.array(pomodoroRecord).max(ARR_MED),
     tokenHistory: z.array(tokenLedgerEntry).max(ARR_LARGE),
