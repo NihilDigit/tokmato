@@ -9,7 +9,6 @@ import { selectSnapshot, useStore } from "@/lib/store";
 import { saveToCloud, loadFromCloud } from "@/app/actions/sync";
 import { cancelPushChain } from "@/app/actions/push";
 import { clearActiveSession } from "@/app/actions/active-session";
-import { recomputeBalances } from "@/lib/ledger";
 
 const AUTOSAVE_DEBOUNCE_MS = 2_000;
 
@@ -157,26 +156,6 @@ function ProviderInner({ children }: { children: React.ReactNode }) {
         // Rollup runs AFTER merge so the source-of-truth for >30d
         // entries is the deduped union of both sides.
         useStore.getState().runRollup();
-        // Drift check — purely diagnostic for v2.0. Covers all three
-        // axes (F / H / time pool) so a regression on any of the new
-        // ledger writes surfaces.
-        const after = useStore.getState();
-        const recomputed = recomputeBalances(after.tokenHistory);
-        if (
-          Math.abs(recomputed.ftoken - after.ftoken) > 0.05 ||
-          Math.abs(recomputed.htoken - after.htoken) > 0.05 ||
-          Math.abs(recomputed.timePool - after.timePool) > 0.5
-        ) {
-          // eslint-disable-next-line no-console
-          console.warn("[sync] balance drift after merge", {
-            stored: {
-              f: after.ftoken,
-              h: after.htoken,
-              pool: after.timePool,
-            },
-            recomputed,
-          });
-        }
       } catch {
         // Network/auth flap — leave local untouched. The user can hit
         // "立即拉取" in Settings to retry.

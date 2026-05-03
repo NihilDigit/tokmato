@@ -794,6 +794,12 @@ describe("auto-sync helpers", () => {
 // applyMergedSnapshot (v9+ default sync path)
 // ===========================================================================
 describe("applyMergedSnapshot", () => {
+  // Use recent createdAt by default so rollup-in-merge doesn't kick in
+  // and tests stay focused on dedup + recompute behavior. Tests that
+  // explicitly exercise rollup behavior pass an older createdAt.
+  const NOW = Date.now();
+  const RECENT = NOW - 60_000; // 1 min ago
+
   function ledgerEntry(over: Partial<{
     id: string;
     kind: "welcome" | "pomodoro" | "settle" | "recharge" | "food" | "wish" | "play" | "rollup";
@@ -817,95 +823,109 @@ describe("applyMergedSnapshot", () => {
       fDelta: over.fDelta ?? 0,
       hDelta: over.hDelta ?? 0,
       minutesDelta: over.minutesDelta,
-      createdAt: over.createdAt ?? 1_000,
+      createdAt: over.createdAt ?? RECENT,
       dayKey: over.dayKey ?? "2026-05-03",
     };
   }
 
-  it("balance = cloud baseline + local entries created after local.lastSavedAt", () => {
-    // Local: lastSavedAt=1000, two ledger entries created after that.
+  it("balance is recomputed from the deduped union of local and cloud ledgers", () => {
     useStore.setState({
-      ftoken: 8,
-      htoken: 5,
+      ftoken: 0,
+      htoken: 0,
       timePool: 0,
-      lastSavedAt: 1000,
+      lastSavedAt: RECENT - 30_000,
       tokenHistory: [
-        ledgerEntry({ id: "p-old", kind: "pomodoro", fDelta: 1, createdAt: 500 }),
-        ledgerEntry({ id: "p-new1", kind: "pomodoro", fDelta: 2, createdAt: 1500 }),
-        ledgerEntry({ id: "p-new2", kind: "pomodoro", fDelta: 1, createdAt: 1800 }),
+        ledgerEntry({ id: "p-shared", fDelta: 1, createdAt: RECENT - 20_000 }),
+        ledgerEntry({ id: "p-local", fDelta: 2, createdAt: RECENT }),
+        ledgerEntry({ id: "p-local-2", fDelta: 1, createdAt: RECENT + 5_000 }),
       ],
     });
     s().applyMergedSnapshot(
       {
-        ftoken: 10,
-        htoken: 5,
-        timePool: 30,
+        // cloud.ftoken passed in is no longer trusted — recompute from
+        // the merged ledger is the source of truth.
+        ftoken: 999,
         tokenHistory: [
-          ledgerEntry({ id: "p-old", kind: "pomodoro", fDelta: 1, createdAt: 500 }),
-          ledgerEntry({ id: "cloud-1", kind: "pomodoro", fDelta: 4, createdAt: 800 }),
+          ledgerEntry({ id: "p-shared", fDelta: 1, createdAt: RECENT - 20_000 }),
+          ledgerEntry({ id: "p-cloud", fDelta: 4, createdAt: RECENT - 10_000 }),
         ],
       },
-      2000,
+      NOW,
     );
-    // mergedF = cloud.ftoken (10) + local-new (2 + 1) = 13
-    expect(s().ftoken).toBe(13);
-    expect(s().htoken).toBe(5);
-    expect(s().timePool).toBe(30);
-    expect(s().lastSavedAt).toBe(2000);
+    // merged ledger: p-shared(1) + p-local(2) + p-local-2(1) + p-cloud(4) = 8
+    expect(s().ftoken).toBe(8);
+    expect(s().lastSavedAt).toBe(NOW);
   });
 
-  it("does NOT re-credit local entries that cloud rolled up out of view (time-filter, not id-filter)", () => {
-    // Scenario: cloud rolled up old entries beyond its history horizon.
-    // cloud.tokenHistory no longer contains them; cloud.ftoken DOES
-    // include them via the rollup. Local still has the raw entries
-    // because it hasn't run rollup yet. The merge must NOT add their
-    // deltas a second time on top of cloud.ftoken.
+  it("collapses raw entries into an existing rollup placeholder so days don't double-count", () => {
+    // Scenario: cloud has run rollup for an old day; local still holds
+    // the raw entries from that day. Merge must fold them into the
+    // existing rollup (recompute then sees one rollup, not two
+    // contributions for the same day).
+    const oldDay = "2026-01-01";
+    const oldCreatedAt = NOW - 60 * 86400_000;
     useStore.setState({
-      lastSavedAt: 5000,
-      ftoken: 10,
+      lastSavedAt: NOW - 50 * 86400_000,
       tokenHistory: [
-        // Old local entry, already accounted for in cloud's accumulated
-        // baseline (cloud rolled it up + the rollup may itself live in
-        // cloud.tokenHistory, but the raw entry doesn't).
         ledgerEntry({
-          id: "p-old-rolled",
-          kind: "pomodoro",
-          fDelta: 4,
-          createdAt: 1000,
+          id: "p-raw-1",
+          fDelta: 3,
+          createdAt: oldCreatedAt,
+          dayKey: oldDay,
+        }),
+        ledgerEntry({
+          id: "p-raw-2",
+          fDelta: 1,
+          createdAt: oldCreatedAt + 1000,
+          dayKey: oldDay,
         }),
       ],
     });
     s().applyMergedSnapshot(
       {
-        ftoken: 10,
-        tokenHistory: [], // cloud's view doesn't surface the old entry
+        ftoken: 4,
+        tokenHistory: [
+          ledgerEntry({
+            id: `rollup-${oldDay}`,
+            kind: "rollup",
+            fDelta: 4,
+            hDelta: 0,
+            createdAt: oldCreatedAt,
+            dayKey: oldDay,
+          }),
+        ],
       },
-      6000,
+      NOW,
     );
-    // Old local entry's createdAt (1000) is NOT > local.lastSavedAt (5000),
-    // so it doesn't contribute. Result: cloud baseline preserved.
-    expect(s().ftoken).toBe(10);
+    // After merge: raw entries collapsed into the existing rollup.
+    // recomputeBalances on [rollup(4)] = 4 (not 4 + 3 + 1 = 8).
+    expect(s().ftoken).toBe(4);
+    expect(
+      s().tokenHistory.filter((e) => e.kind === "rollup"),
+    ).toHaveLength(1);
   });
 
   it("id-dedups tokenHistory union; cloud entry wins on collision", () => {
     useStore.setState({
-      lastSavedAt: 1000,
-      tokenHistory: [ledgerEntry({ id: "shared", fDelta: 1, createdAt: 500 })],
+      lastSavedAt: RECENT - 30_000,
+      tokenHistory: [
+        ledgerEntry({ id: "shared", fDelta: 1, createdAt: RECENT - 20_000 }),
+      ],
     });
     s().applyMergedSnapshot(
       {
         ftoken: 0,
         tokenHistory: [
-          ledgerEntry({ id: "shared", fDelta: 1, createdAt: 500 }),
-          ledgerEntry({ id: "cloud-only", kind: "pomodoro", fDelta: 2, createdAt: 800 }),
+          ledgerEntry({ id: "shared", fDelta: 1, createdAt: RECENT - 20_000 }),
+          ledgerEntry({ id: "cloud-only", fDelta: 2, createdAt: RECENT - 10_000 }),
         ],
       },
-      2000,
+      NOW,
     );
     expect(s().tokenHistory.map((e) => e.id).sort()).toEqual(["cloud-only", "shared"]);
   });
 
-  it("welcome dedup: keeps earliest welcome and reverses dropped delta from balance", () => {
+  it("welcome dedup: keeps earliest welcome, balance still equals one welcome", () => {
     useStore.setState({
       ftoken: 5,
       htoken: 10,
@@ -916,7 +936,7 @@ describe("applyMergedSnapshot", () => {
           kind: "welcome",
           fDelta: 5,
           hDelta: 10,
-          createdAt: 200,
+          createdAt: RECENT,
         }),
       ],
     });
@@ -930,22 +950,80 @@ describe("applyMergedSnapshot", () => {
             kind: "welcome",
             fDelta: 5,
             hDelta: 10,
-            createdAt: 100,
+            createdAt: RECENT - 5_000,
           }),
         ],
       },
-      1000,
+      NOW,
     );
-    // merged ledger initially has both welcome ids; dedupWelcomeEntries
-    // collapses to earliest (w-cloud) and reports fAdjust=-5/hAdjust=-10
-    // (the dropped w-anon's deltas, negated). Balance math:
-    //   cloud (5,10) + localOnly w-anon (+5,+10) + welcome dedup (-5,-10)
-    //   = (5,10) — i.e. exactly one welcome's worth, not double.
     expect(s().ftoken).toBe(5);
     expect(s().htoken).toBe(10);
     const welcomes = s().tokenHistory.filter((e) => e.kind === "welcome");
     expect(welcomes).toHaveLength(1);
     expect(welcomes[0].id).toBe("w-cloud");
+  });
+
+  it("does NOT over-subtract on orphan welcome (saved-then-overwritten on cloud)", () => {
+    // Regression for the v2.2.1 bug: local kept a welcome it once saved
+    // to cloud (so lastSavedAt > welcome.createdAt), but cloud was then
+    // overwritten by another device and no longer has it. The earlier
+    // formula dropped the orphan via dedupWelcomeEntries (fAdjust=-5)
+    // while excluding it from fNew (time gate), so balance came out as
+    // cloud.ftoken - 5. recomputeBalances on the merged ledger fixes
+    // it: the orphan is dropped, balance = sum of remaining ledger.
+    useStore.setState({
+      ftoken: 5,
+      htoken: 10,
+      timePool: 0,
+      // Orphan: saved before lastSavedAt
+      lastSavedAt: RECENT - 1_000,
+      tokenHistory: [
+        ledgerEntry({
+          id: "w-orphan",
+          kind: "welcome",
+          fDelta: 5,
+          hDelta: 10,
+          createdAt: RECENT - 5_000,
+        }),
+      ],
+    });
+    s().applyMergedSnapshot(
+      {
+        ftoken: 3.5,
+        htoken: 10,
+        timePool: 60,
+        tokenHistory: [
+          ledgerEntry({
+            id: "w-canonical",
+            kind: "welcome",
+            fDelta: 5,
+            hDelta: 10,
+            createdAt: RECENT - 60_000,
+          }),
+          ledgerEntry({
+            id: "settle-1",
+            kind: "settle",
+            fDelta: 0.5,
+            hDelta: 0,
+            createdAt: RECENT - 30_000,
+          }),
+          ledgerEntry({
+            id: "recharge-1",
+            kind: "recharge",
+            fDelta: -2,
+            hDelta: 0,
+            minutesDelta: 60,
+            createdAt: RECENT - 20_000,
+          }),
+        ],
+      },
+      NOW,
+    );
+    // merged ledger (after dedup): [w-canonical, settle-1, recharge-1]
+    // recompute = 5 + 0.5 + (-2) = 3.5; htoken = 10; pool = 60.
+    expect(s().ftoken).toBe(3.5);
+    expect(s().htoken).toBe(10);
+    expect(s().timePool).toBe(60);
   });
 
   it("dedups id-keyed collections (wishlist, kanban inbox, foodPresets)", () => {
@@ -983,12 +1061,9 @@ describe("applyMergedSnapshot", () => {
 
   it("does NOT double when local has same-id entries as cloud and lastSavedAt=0 (sign-in race)", () => {
     // Race scenario: providers.tsx fires welcome's saveToCloud and
-    // autoload's loadFromCloud in parallel. If saveToCloud commits first
-    // but autoload's loadFromCloud response continuation runs before
-    // welcome's markSynced(), local.lastSavedAt is still 0 and every
-    // entry passes the time gate. Without an id-membership check in the
-    // merge, fNew/hNew sum already-cloud-accounted entries, doubling
-    // the balance.
+    // autoload's loadFromCloud in parallel. Even when local.lastSavedAt
+    // is still 0, recomputeBalances on the merged + deduped ledger
+    // gives the right answer (one welcome, balance = 5/10).
     useStore.setState({
       ftoken: 5,
       htoken: 10,
@@ -999,7 +1074,7 @@ describe("applyMergedSnapshot", () => {
           kind: "welcome",
           fDelta: 5,
           hDelta: 10,
-          createdAt: 200,
+          createdAt: RECENT,
         }),
       ],
     });
@@ -1013,11 +1088,11 @@ describe("applyMergedSnapshot", () => {
             kind: "welcome",
             fDelta: 5,
             hDelta: 10,
-            createdAt: 200,
+            createdAt: RECENT,
           }),
         ],
       },
-      1000,
+      NOW,
     );
     expect(s().ftoken).toBe(5);
     expect(s().htoken).toBe(10);
@@ -1028,13 +1103,13 @@ describe("applyMergedSnapshot", () => {
       ftoken: 5,
       htoken: 10,
       tokenHistory: [
-        ledgerEntry({ id: "cloud-1", fDelta: 1, createdAt: 500 }),
+        ledgerEntry({ id: "cloud-1", fDelta: 1, createdAt: RECENT }),
       ],
     };
-    s().applyMergedSnapshot(cloud, 1000);
+    s().applyMergedSnapshot(cloud, NOW);
     const lenAfterFirst = s().tokenHistory.length;
     const fAfterFirst = s().ftoken;
-    s().applyMergedSnapshot(cloud, 1000);
+    s().applyMergedSnapshot(cloud, NOW);
     expect(s().tokenHistory.length).toBe(lenAfterFirst);
     expect(s().ftoken).toBe(fAfterFirst);
   });

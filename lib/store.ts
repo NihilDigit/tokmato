@@ -30,7 +30,7 @@ import type {
   TokenLedgerEntry,
 } from "./types";
 import { totalBonusF } from "./bonus";
-import { dedupWelcomeEntries, rolledUpEntries } from "./ledger";
+import { dedupWelcomeEntries, recomputeBalances, rolledUpEntries } from "./ledger";
 
 // ─────────────────────────────────────────────────────────────────────────
 // Defaults — first-run starter state; once user has data in storage, this is unused.
@@ -295,43 +295,34 @@ export const useStore = create<Store>()(
           };
           const cloudHistory = (cloud.tokenHistory ?? []) as TokenLedgerEntry[];
           const tokenHistoryRaw = dedupBy(local.tokenHistory, cloudHistory);
-          const { entries: tokenHistory, fAdjust, hAdjust } =
+          const { entries: tokenHistoryDeduped } =
             dedupWelcomeEntries(tokenHistoryRaw);
-          // Balance reconciliation:
-          //   cloud baseline (cloud has its own ledger + accumulated balance,
-          //   including any rolled-up / truncated entries no longer visible
-          //   in cloud.tokenHistory)
-          // + local entries created AFTER local.lastSavedAt AND not already
-          //   represented in cloud.tokenHistory by id (= contributions this
-          //   device made since the last sync — anything older was already
-          //   accounted for in cloud's baseline by definition)
-          // + welcome dedup adjustment (negate dropped duplicate welcomes).
-          //
-          // Both filters are needed:
-          //   - id-set filter alone re-credits rolled-up entries that
-          //     dropped out of cloud.tokenHistory but are still in cloud's
-          //     accumulated balance.
-          //   - time filter alone double-counts entries on a sign-in race
-          //     where saveToCloud commits before markSynced runs but
-          //     loadFromCloud's response continuation runs first
-          //     (lastSavedAt is still 0, so every local entry passes the
-          //     time gate even though cloud already has them).
-          const cloudIds = new Set(cloudHistory.map((e) => e.id));
-          const localNew = local.tokenHistory.filter(
-            (e) =>
-              e.createdAt > local.lastSavedAt && !cloudIds.has(e.id),
+          // Apply rollup before recompute so a day that's already
+          // collapsed into a rollup placeholder on one side and still
+          // raw on the other doesn't get counted twice. Same 30-day
+          // cutoff as the standalone runRollup. Idempotent.
+          const tokenHistory = rolledUpEntries(
+            tokenHistoryDeduped,
+            Date.now() - 30 * 86400 * 1000,
           );
-          let fNew = 0;
-          let hNew = 0;
-          let mNew = 0;
-          for (const e of localNew) {
-            fNew += e.fDelta;
-            hNew += e.hDelta;
-            if (typeof e.minutesDelta === "number") mNew += e.minutesDelta;
-          }
-          const ftoken = round((cloud.ftoken ?? 0) + fNew + fAdjust);
-          const htoken = round((cloud.htoken ?? 0) + hNew + hAdjust);
-          const timePool = clamp((cloud.timePool ?? 0) + mNew);
+          // Balance is recomputed from the merged + deduped + rolled-up
+          // ledger as the single source of truth. The earlier
+          // `cloud + fNew + fAdjust` formula had a corner case: when
+          // local held an "orphan" welcome (saved to cloud once, then
+          // cloud was overwritten by another device, so
+          // local.lastSavedAt > welcome.createdAt but the welcome is no
+          // longer in cloud), dedupWelcomeEntries would drop the orphan
+          // and subtract its delta via fAdjust, while the time + id
+          // filters excluded it from fNew — over-subtracting by one
+          // welcome's worth from the merged balance.
+          // recomputeBalances on the post-rollup ledger avoids that
+          // class of accounting bugs and self-heals any historical drift
+          // the old formula left in cloud.ftoken / htoken / timePool.
+          const { ftoken: rawF, htoken: rawH, timePool: rawPool } =
+            recomputeBalances(tokenHistory);
+          const ftoken = round(rawF);
+          const htoken = round(rawH);
+          const timePool = clamp(rawPool);
           const cloudKanban = cloud.kanban ?? local.kanban;
           // Recompute today's per-axis / per-tag counters from the merged
           // pomodoro + ledger history rather than trusting cloud's snapshot
