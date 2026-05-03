@@ -78,11 +78,13 @@ export function EditTagSheet({
             value={label}
             onChange={(e) => setLabel(e.target.value)}
             placeholder="#math"
-            aria-label="Tag 名称"
+            maxLength={50}
+            aria-label={isEdit ? `编辑 tag 名称（当前 ${initial?.label ?? ""}）` : "新建 tag 名称"}
             className={cn(
               "w-full bg-transparent border-0 border-b-2 border-rule",
               "px-0 py-3 font-serif text-[19px] leading-snug text-ink",
               "placeholder:text-ink-mute focus:border-tomato focus:outline-none",
+              "focus-visible:ring-2 focus-visible:ring-tomato/30 focus-visible:rounded-sm",
               "transition-colors",
             )}
           />
@@ -103,14 +105,15 @@ export function EditTagSheet({
                   type="button"
                   role="radio"
                   aria-checked={active}
-                  aria-label={c}
+                  aria-label={`颜色 ${c}`}
                   onClick={() => setColor(c)}
                   className={cn(
-                    "h-8 w-8 rounded-full transition-transform",
+                    "h-10 w-10 rounded-full transition-transform",
                     TAG_BG_CLASSES[c],
                     active
                       ? "ring-2 ring-ink ring-offset-2 ring-offset-paper scale-110"
                       : "ring-1 ring-rule hover:scale-105",
+                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink focus-visible:ring-offset-2 focus-visible:ring-offset-paper",
                   )}
                 />
               );

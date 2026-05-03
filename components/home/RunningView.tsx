@@ -293,9 +293,11 @@ export function RunningView({ session, onEnd }: RunningViewProps) {
                 if (e.key === "Enter" && noteDraft.trim()) submitNote();
               }}
               placeholder="写下来, 番茄结束后处理..."
+              maxLength={500}
               className={cn(
                 "w-full border-0 border-b border-rule bg-transparent py-2 text-[15px] leading-snug text-ink",
                 "placeholder:text-ink-mute focus:border-tomato focus:outline-none",
+                "focus-visible:ring-2 focus-visible:ring-tomato/30 focus-visible:rounded-sm",
                 "font-kaiti"
               )}
             />

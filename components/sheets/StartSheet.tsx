@@ -106,6 +106,7 @@ export function StartSheet({
               "w-full bg-transparent border-0 border-b-2 border-rule",
               "px-0 py-3 font-serif text-[19px] leading-snug text-ink",
               "placeholder:text-ink-mute focus:border-tomato focus:outline-none",
+              "focus-visible:ring-2 focus-visible:ring-tomato/30 focus-visible:rounded-sm",
               "transition-colors"
             )}
           />

@@ -557,3 +557,20 @@ body[data-sheet-open] .mobile-tabbar {
     @apply font-sans;
   }
 }
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Reduced-motion guard — per .impeccable.md design principle.
+   JS-driven animations (Confetti, SettleSheet count-up) check the same
+   media query independently; this CSS rule covers the long tail of CSS
+   transitions and Tailwind `transition-*` utilities applied via class.
+   ───────────────────────────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

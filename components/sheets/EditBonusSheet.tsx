@@ -134,16 +134,19 @@ export function EditBonusSheet({
                     type="button"
                     role="radio"
                     aria-checked={active}
+                    aria-label={`关联到 ${t.label}`}
                     onClick={() => setTagId(t.id)}
                     className={cn(
-                      "inline-flex items-center gap-2 rounded-full px-3.5 py-1.5",
+                      "inline-flex min-h-9 items-center gap-2 rounded-full px-3.5 py-1.5",
                       "font-mono text-[13px] leading-none transition-colors",
                       active
                         ? "border-[1.5px] border-ink bg-ink/4 text-ink"
                         : "border border-rule text-ink-3 hover:text-ink-2",
+                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/30",
                     )}
                   >
                     <span
+                      aria-hidden
                       className={cn("h-2 w-2 rounded-full", TAG_BG_CLASSES[t.color])}
                     />
                     {t.label}
@@ -294,6 +297,8 @@ function NumberField({
         inputMode={allowNegative ? "decimal" : "numeric"}
         step={1}
         min={allowNegative ? undefined : (min ?? 0)}
+        max={10000}
+        aria-label={sub ? `${label}（${sub}）` : label}
         value={Number.isFinite(value) ? value : ""}
         onChange={(e) => {
           const n = e.target.value === "" ? 0 : Number(e.target.value);
@@ -304,6 +309,7 @@ function NumberField({
           "w-full bg-transparent border-0 border-b-2 border-rule",
           "px-0 py-2 font-mono text-[18px] leading-snug text-ink",
           "focus:border-tomato focus:outline-none transition-colors",
+          "focus-visible:ring-2 focus-visible:ring-tomato/30 focus-visible:rounded-sm",
         )}
       />
     </label>

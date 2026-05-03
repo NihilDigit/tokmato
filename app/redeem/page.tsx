@@ -312,16 +312,16 @@ function WishCard({
       className="group flex flex-col gap-3.5 rounded-xl border border-rule bg-paper p-5 text-left transition hover:-translate-y-px hover:border-ink/25 hover:shadow-soft"
     >
       <div className="flex items-start justify-between gap-3">
-        <div className="flex-1">
-          <div className="serif text-lg leading-snug">{item.name}</div>
+        <div className="flex-1 min-w-0">
+          <div className="serif text-lg leading-snug line-clamp-2 break-words">{item.name}</div>
           <div className="mt-1 mono text-xs text-ink-3">¥{item.price} · {tokenForPay}</div>
         </div>
-        <span className={`mono rounded-full px-2.5 py-0.5 text-[10px] tracking-wide ${tagBg}`}>
+        <span className={`mono shrink-0 rounded-full px-2.5 py-0.5 text-[10px] tracking-wide ${tagBg}`}>
           {tagLabel}
         </span>
       </div>
 
-      <p className="m-0 text-[13px] leading-relaxed text-ink-2">{item.why}</p>
+      <p className="m-0 text-[13px] leading-relaxed text-ink-2 line-clamp-3 break-words">{item.why}</p>
 
       <div>
         <div className="mono mb-1 flex justify-between text-[10px] text-ink-3">
@@ -349,10 +349,10 @@ function AchievementCard({ item }: { item: Achievement }) {
       <span className="mono absolute right-2.5 top-2.5 rounded-full bg-ink px-2 py-0.5 text-[9px] tracking-wide text-paper">
         已兑换
       </span>
-      <div className="mt-1 text-[26px] leading-none">{glyph}</div>
-      <div className="serif text-base leading-snug">{item.name}</div>
+      <div className="mt-1 text-[26px] leading-none" aria-hidden>{glyph}</div>
+      <div className="serif text-base leading-snug line-clamp-2 break-words">{item.name}</div>
       <div className="mono text-[10px] text-ink-3">¥{item.price} · {item.date}</div>
-      <div className="border-t border-rule pt-2 text-[12px] leading-relaxed text-ink-2">
+      <div className="border-t border-rule pt-2 text-[12px] leading-relaxed text-ink-2 line-clamp-3 break-words">
         {item.why}
       </div>
     </div>

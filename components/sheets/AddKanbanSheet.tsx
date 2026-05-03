@@ -111,10 +111,12 @@ export function AddKanbanSheet({
             onChange={(e) => setNext(e.target.value)}
             placeholder="第一个具体动作 (空着也行)"
             aria-label="下一步"
+            maxLength={200}
             className={cn(
               "w-full border-0 border-b border-rule bg-transparent",
               "px-0 py-2 text-[14px] leading-snug text-ink-2",
               "placeholder:text-ink-mute focus:border-ink/40 focus:outline-none",
+              "focus-visible:ring-2 focus-visible:ring-ink/20 focus-visible:rounded-sm",
               "font-kaiti"
             )}
           />

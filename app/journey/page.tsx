@@ -537,9 +537,23 @@ function Donut({
   const cy = size / 2;
   const total = data.reduce((acc, d) => acc + d.pct, 0) || 1;
 
+  // Build a one-line summary for the SVG aria-label so screen readers
+  // get the distribution at a glance: "math 40%, cs 25%, english 20%, ..."
+  const summary = data
+    .filter((d) => d.pct > 0)
+    .sort((a, b) => b.pct - a.pct)
+    .map((d) => `${d.tag.label} ${d.pct}%`)
+    .join("，");
+  const ariaLabel = summary ? `tag 分布：${summary}` : "tag 分布：暂无数据";
   let start = -Math.PI / 2; // start at 12 o'clock
   return (
-    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden>
+    <svg
+      width={size}
+      height={size}
+      viewBox={`0 0 ${size} ${size}`}
+      role="img"
+      aria-label={ariaLabel}
+    >
       {data.map((d) => {
         const angle = (d.pct / total) * Math.PI * 2;
         const end = start + angle;
@@ -556,7 +570,9 @@ function Donut({
             fill={TAG_FILL_VAR[d.tag.color]}
             stroke="var(--paper)"
             strokeWidth="1"
-          />
+          >
+            <title>{`${d.tag.label} ${d.pct}%`}</title>
+          </path>
         );
         start = end;
         return slice;
@@ -581,6 +597,8 @@ function Heatmap({ toneClass, counts }: { toneClass: string; counts: number[] })
 
   return (
     <div
+      role="grid"
+      aria-label="过去 30 天番茄分布热力图"
       className="grid gap-[3px]"
       style={{
         gridTemplateColumns: `repeat(${COLS}, minmax(0, 1fr))`,
@@ -600,11 +618,14 @@ function Heatmap({ toneClass, counts }: { toneClass: string; counts: number[] })
         const mm = String(date.getMonth() + 1).padStart(2, "0");
         const dd = String(date.getDate()).padStart(2, "0");
         const dateStr = `${yyyy}/${mm}/${dd}`;
+        const cellLabel = `${dateStr}，${pomos} 个番茄`;
 
         return (
           <div
             key={i}
-            title={`${dateStr} · ${pomos} 个番茄`}
+            role="gridcell"
+            aria-label={cellLabel}
+            title={cellLabel}
             className={cn(
               "aspect-square cursor-help rounded-[2px]",
               isEmpty ? "bg-ink" : tone
