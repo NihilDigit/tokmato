@@ -69,14 +69,19 @@ export function EditBonusSheet({
   }, [open, initial, fallbackTagId]);
 
   const tagExists = tags.some((t) => t.id === tagId);
+  // All four numeric fields are non-negative by design — bonuses only
+  // reward, never punish. HTML min={0} on the inputs is a UI hint only;
+  // pasted/typed negatives must be blocked at the save gate too.
   const canSave =
     tagExists &&
     Number.isFinite(threshold) &&
     threshold >= 0 &&
     Number.isFinite(initialReward) &&
+    initialReward >= 0 &&
     Number.isFinite(step) &&
     step >= 0 &&
-    Number.isFinite(stepReward);
+    Number.isFinite(stepReward) &&
+    stepReward >= 0;
 
   const handleSave = () => {
     if (!canSave) return;

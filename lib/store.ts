@@ -767,17 +767,45 @@ export const useStore = create<Store>()(
         set((s) => {
           if (!s.tags.some((t) => t.id === tagId)) return s;
           const id = `b-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+          // Boundary clamp — bonuses only reward, never punish. Mirrors
+          // the EditBonusSheet save gate so any non-UI caller (cloud
+          // merge with stale config, programmatic seeding) can't smuggle
+          // negatives in either.
           return {
             bonuses: [
               ...s.bonuses,
-              { id, tagId, threshold, initialReward, step, stepReward },
+              {
+                id,
+                tagId,
+                threshold: Math.max(0, threshold),
+                initialReward: Math.max(0, initialReward),
+                step: Math.max(0, step),
+                stepReward: Math.max(0, stepReward),
+              },
             ],
           };
         }),
 
       updateBonus: (id, patch) =>
         set((s) => ({
-          bonuses: s.bonuses.map((b) => (b.id === id ? { ...b, ...patch } : b)),
+          bonuses: s.bonuses.map((b) =>
+            b.id === id
+              ? {
+                  ...b,
+                  ...patch,
+                  ...(patch.threshold !== undefined && {
+                    threshold: Math.max(0, patch.threshold),
+                  }),
+                  ...(patch.initialReward !== undefined && {
+                    initialReward: Math.max(0, patch.initialReward),
+                  }),
+                  ...(patch.step !== undefined && { step: Math.max(0, patch.step) }),
+                  ...(patch.stepReward !== undefined && {
+                    stepReward: Math.max(0, patch.stepReward),
+                  }),
+                }
+              : b,
+          ),
         })),
 
       removeBonus: (id) =>
