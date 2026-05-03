@@ -27,8 +27,17 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     // Use shadcn-styled custom sign-in page later. For now, default.
   },
   callbacks: {
+    async jwt({ token, account }) {
+      // Bind token.sub to the OAuth provider's stable account id on first
+      // sign-in. Without this, JWT strategy + no DB adapter mints a fresh
+      // UUID per device, so each device ends up in its own KV namespace
+      // and cross-device sync silently splits.
+      if (account?.providerAccountId) {
+        token.sub = `${account.provider}:${account.providerAccountId}`;
+      }
+      return token;
+    },
     async session({ session, token }) {
-      // Surface the user id (from `sub`) so server actions can namespace KV keys.
       if (token.sub && session.user) {
         (session.user as typeof session.user & { id: string }).id = token.sub;
       }
