@@ -57,7 +57,7 @@ function ProviderInner({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
-  // Welcome bonus — per-browser flag (v9+), no auth dependency. Anon
+  // Welcome bonus — per-browser flag (v2.0+), no auth dependency. Anon
   // visitors get the +5F/+10H grant once per browser, so the loop closes
   // before login. Cloud-side dedup is handled at merge time by
   // `dedupWelcomeEntries` in lib/ledger.ts (collapses anon + cloud
@@ -132,7 +132,7 @@ function ProviderInner({ children }: { children: React.ReactNode }) {
   }, [storeReady, status]);
 
   // ─── Auto-sync: app-open default-merge load (once per auth session) ───
-  // v9+ replaces the v1.x LWW wholesale-overwrite. Always merges cloud
+  // v2.0+ replaces the v1.x LWW wholesale-overwrite. Always merges cloud
   // with local: id-dedup collections, balance = cloud baseline + local
   // entries with createdAt > cloud.savedAt + welcome dedup adjust.
   // Idempotent — re-running with the same cloud snapshot is a no-op.
@@ -157,7 +157,7 @@ function ProviderInner({ children }: { children: React.ReactNode }) {
         // Rollup runs AFTER merge so the source-of-truth for >30d
         // entries is the deduped union of both sides.
         useStore.getState().runRollup();
-        // Drift check — purely diagnostic for v9. Covers all three
+        // Drift check — purely diagnostic for v2.0. Covers all three
         // axes (F / H / time pool) so a regression on any of the new
         // ledger writes surfaces.
         const after = useStore.getState();
@@ -264,6 +264,11 @@ function balanceSignature(s: ReturnType<typeof useStore.getState>): string {
     s.wishlist.length,
     s.achievements.length,
     s.foodPresets.length,
+    // Tag and bonus edits are renames/recolors/parameter tweaks that
+    // preserve array length — must hash content, not just length, or
+    // autosave misses them and the next merge sees stale cloud win.
+    JSON.stringify(s.tags),
+    JSON.stringify(s.bonuses),
     // Kanban changes don't gate on balance but the user expects them to
     // sync — fold a stable kanban shape into the signature.
     s.kanban.inbox.length,

@@ -603,15 +603,7 @@ export default function SettingsPage() {
             addTag(data);
           }
         }}
-        onDelete={
-          tagEditing
-            ? () => {
-                if (confirm(`删除 Tag "${tagEditing.label}"？关联的 bonus 也会一起删掉。历史记录不动。`)) {
-                  removeTag(tagEditing.id);
-                }
-              }
-            : undefined
-        }
+        onDelete={tagEditing ? () => removeTag(tagEditing.id) : undefined}
       />
 
       <EditBonusSheet

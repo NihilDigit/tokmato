@@ -120,6 +120,8 @@ export function LedgerSheet({ open, onOpenChange }: LedgerSheetProps) {
                 <button
                   type="button"
                   onClick={() => toggleDay(dayKey)}
+                  aria-expanded={isOpen}
+                  aria-controls={`ledger-day-${dayKey}`}
                   className="w-full text-left transition-colors hover:bg-paper-2/60"
                 >
                   <LedgerDayHeader
@@ -135,7 +137,7 @@ export function LedgerSheet({ open, onOpenChange }: LedgerSheetProps) {
                   />
                 </button>
                 {isOpen && (
-                  <div className="border-t border-rule">
+                  <div id={`ledger-day-${dayKey}`} className="border-t border-rule">
                     {entries.map((e) => (
                       <LedgerEntryRow key={e.id} entry={e} tagsById={tagsById} />
                     ))}

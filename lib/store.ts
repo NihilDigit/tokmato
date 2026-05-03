@@ -3,11 +3,12 @@
 /**
  * tokmato Zustand store — single source of truth for user state.
  *
- * Phase 5 (current): localStorage persist via zustand/middleware/persist.
- * Phase 6 (future): adds bidirectional KV sync layer (Upstash Redis via
- * Server Actions / API route) — same store API, just wraps the storage
- * adapter. Replace `createJSONStorage(() => localStorage)` with a
- * KV-backed storage when auth is wired up.
+ * Persistence: zustand/middleware/persist writes to localStorage with
+ * `skipHydration: true`; providers.tsx triggers rehydrate after mount.
+ * Cloud sync (Upstash Redis via app/actions/sync.ts) ships
+ * `selectSnapshot(state)` — same projection drives both partialize and
+ * cloud writes. Default merge on auth is `applyMergedSnapshot`; the
+ * v1.x `applyCloudSnapshot` is retained as a Settings escape hatch.
  */
 
 import { create } from "zustand";
@@ -161,7 +162,7 @@ interface StoreActions {
   // Settlement
   settle: (data: { fGained: number; hGained: number }) => void;
   ensureToday: () => void;
-  /** Grant the +5F/+10H welcome bonus once. v9+ idempotency lives on a
+  /** Grant the +5F/+10H welcome bonus once. v2.0+ idempotency lives on a
    *  per-browser localStorage flag in providers.tsx; this action just
    *  applies the bonus + writes a `kind:"welcome"` ledger entry whenever
    *  called. The caller is responsible for not calling twice. */
@@ -173,7 +174,7 @@ interface StoreActions {
    *  the corresponding savedAt. Used by the Settings "立即拉取"
    *  escape hatch (force overwrite local with cloud). */
   applyCloudSnapshot: (snapshot: Partial<UserState>, savedAt: number) => void;
-  /** v9+ default sync path. Merges a cloud snapshot with local state:
+  /** v2.0+ default sync path. Merges a cloud snapshot with local state:
    *  id-dedup union for collections; balance = cloud + local entries
    *  with createdAt > cloud.savedAt; welcome dedup via
    *  `dedupWelcomeEntries`. Idempotent — re-running with the same cloud
@@ -408,7 +409,7 @@ export const useStore = create<Store>()(
 
       grantWelcomeBonus: () =>
         set((s) => {
-          // v9+: idempotency is delegated to the per-browser localStorage
+          // v2.0+: idempotency is delegated to the per-browser localStorage
           // flag (`tokmato:welcome-granted`) checked by the caller. This
           // action unconditionally applies the bonus and emits a ledger
           // entry. Multiple welcomes (e.g. anon-then-cloud collision) are
@@ -623,7 +624,13 @@ export const useStore = create<Store>()(
           // attached to this tag. Replaces v1.7's hardcoded math 5/7/9/11
           // ladder; default seed bonus replicates the same behavior up to
           // tier 3 and extrapolates past it.
-          const bonusF = totalBonusF(s.bonuses, tagId, baseTagCount, newTagCount);
+          // Defensive clamp: a misconfigured bonus (e.g. a v9-pre-clamp
+          // config still in cloud) must never punish a completed pomo
+          // by driving F below the base earn rate.
+          const bonusF = Math.max(
+            0,
+            totalBonusF(s.bonuses, tagId, baseTagCount, newTagCount),
+          );
           const totalFGain = fGain + bonusF;
           // Update recents
           const taskName = s.session.task;

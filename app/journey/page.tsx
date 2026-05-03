@@ -376,6 +376,8 @@ function LedgerCompactSection() {
                       expandedDayKey === dayKey ? defaultExpand : dayKey,
                     )
                   }
+                  aria-expanded={isOpen}
+                  aria-controls={`ledger-compact-day-${dayKey}`}
                   className="text-left transition-colors hover:bg-paper-2/60"
                 >
                   <LedgerDayHeader
@@ -391,7 +393,10 @@ function LedgerCompactSection() {
                   />
                 </button>
                 {isOpen && (
-                  <div className="border-t border-rule overflow-y-auto flex-1 min-h-0">
+                  <div
+                    id={`ledger-compact-day-${dayKey}`}
+                    className="border-t border-rule overflow-y-auto flex-1 min-h-0"
+                  >
                     {entries.map((e) => (
                       <LedgerEntryRow key={e.id} entry={e} tagsById={tagsById} />
                     ))}

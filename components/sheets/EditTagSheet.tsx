@@ -36,6 +36,7 @@ export function EditTagSheet({
   const isEdit = initial !== undefined;
   const [label, setLabel] = useState(initial?.label ?? "");
   const [color, setColor] = useState<TagColor>(initial?.color ?? "tomato");
+  const [armDelete, setArmDelete] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   // Re-seed when the sheet opens or `initial` swaps to a different tag.
@@ -43,6 +44,7 @@ export function EditTagSheet({
     if (!open) return;
     setLabel(initial?.label ?? "");
     setColor(initial?.color ?? "tomato");
+    setArmDelete(false);
     const id = window.setTimeout(() => inputRef.current?.focus(), 60);
     return () => window.clearTimeout(id);
   }, [open, initial]);
@@ -121,17 +123,23 @@ export function EditTagSheet({
             <button
               type="button"
               onClick={() => {
+                if (!armDelete) {
+                  setArmDelete(true);
+                  return;
+                }
                 onDelete();
                 onOpenChange(false);
               }}
               className={cn(
                 "inline-flex min-h-10 items-center gap-1.5 rounded-full px-4",
-                "text-sm text-plum hover:bg-plum/8",
-                "transition-colors",
+                "text-sm transition-colors",
+                armDelete
+                  ? "bg-plum text-paper hover:bg-plum/85"
+                  : "text-plum hover:bg-plum/8",
               )}
             >
               <Trash2 size={14} />
-              删除
+              {armDelete ? "再点确认（同时删关联 bonus）" : "删除"}
             </button>
           ) : (
             <span />
