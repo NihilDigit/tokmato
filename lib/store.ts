@@ -301,15 +301,25 @@ export const useStore = create<Store>()(
           //   cloud baseline (cloud has its own ledger + accumulated balance,
           //   including any rolled-up / truncated entries no longer visible
           //   in cloud.tokenHistory)
-          // + local entries created AFTER local.lastSavedAt (= contributions
-          //   this device made since the last sync — anything older was
-          //   already accounted for in cloud's baseline by definition)
+          // + local entries created AFTER local.lastSavedAt AND not already
+          //   represented in cloud.tokenHistory by id (= contributions this
+          //   device made since the last sync — anything older was already
+          //   accounted for in cloud's baseline by definition)
           // + welcome dedup adjustment (negate dropped duplicate welcomes).
           //
-          // Time-based filter is safer than id-set difference: if cloud
-          // rolled up old entries, an id-set filter would re-credit them.
+          // Both filters are needed:
+          //   - id-set filter alone re-credits rolled-up entries that
+          //     dropped out of cloud.tokenHistory but are still in cloud's
+          //     accumulated balance.
+          //   - time filter alone double-counts entries on a sign-in race
+          //     where saveToCloud commits before markSynced runs but
+          //     loadFromCloud's response continuation runs first
+          //     (lastSavedAt is still 0, so every local entry passes the
+          //     time gate even though cloud already has them).
+          const cloudIds = new Set(cloudHistory.map((e) => e.id));
           const localNew = local.tokenHistory.filter(
-            (e) => e.createdAt > local.lastSavedAt,
+            (e) =>
+              e.createdAt > local.lastSavedAt && !cloudIds.has(e.id),
           );
           let fNew = 0;
           let hNew = 0;

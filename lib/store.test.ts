@@ -981,6 +981,48 @@ describe("applyMergedSnapshot", () => {
     expect(s().kanban.inbox.map((c) => c.id).sort()).toEqual(["k1", "k2"]);
   });
 
+  it("does NOT double when local has same-id entries as cloud and lastSavedAt=0 (sign-in race)", () => {
+    // Race scenario: providers.tsx fires welcome's saveToCloud and
+    // autoload's loadFromCloud in parallel. If saveToCloud commits first
+    // but autoload's loadFromCloud response continuation runs before
+    // welcome's markSynced(), local.lastSavedAt is still 0 and every
+    // entry passes the time gate. Without an id-membership check in the
+    // merge, fNew/hNew sum already-cloud-accounted entries, doubling
+    // the balance.
+    useStore.setState({
+      ftoken: 5,
+      htoken: 10,
+      lastSavedAt: 0,
+      tokenHistory: [
+        ledgerEntry({
+          id: "w-shared",
+          kind: "welcome",
+          fDelta: 5,
+          hDelta: 10,
+          createdAt: 200,
+        }),
+      ],
+    });
+    s().applyMergedSnapshot(
+      {
+        ftoken: 5,
+        htoken: 10,
+        tokenHistory: [
+          ledgerEntry({
+            id: "w-shared",
+            kind: "welcome",
+            fDelta: 5,
+            hDelta: 10,
+            createdAt: 200,
+          }),
+        ],
+      },
+      1000,
+    );
+    expect(s().ftoken).toBe(5);
+    expect(s().htoken).toBe(10);
+  });
+
   it("is idempotent — re-running with the same cloud snapshot doesn't grow ledger", () => {
     const cloud = {
       ftoken: 5,
