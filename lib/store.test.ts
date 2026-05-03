@@ -791,6 +791,258 @@ describe("auto-sync helpers", () => {
 });
 
 // ===========================================================================
+// applyMergedSnapshot (v9+ default sync path)
+// ===========================================================================
+describe("applyMergedSnapshot", () => {
+  function ledgerEntry(over: Partial<{
+    id: string;
+    kind: "welcome" | "pomodoro" | "settle" | "recharge" | "food" | "wish" | "play" | "rollup";
+    fDelta: number;
+    hDelta: number;
+    minutesDelta: number;
+    createdAt: number;
+    dayKey: string;
+  }> = {}): {
+    id: string;
+    kind: "welcome" | "pomodoro" | "settle" | "recharge" | "food" | "wish" | "play" | "rollup";
+    fDelta: number;
+    hDelta: number;
+    minutesDelta?: number;
+    createdAt: number;
+    dayKey: string;
+  } {
+    return {
+      id: over.id ?? `t-${Math.random().toString(36).slice(2, 8)}`,
+      kind: over.kind ?? "pomodoro",
+      fDelta: over.fDelta ?? 0,
+      hDelta: over.hDelta ?? 0,
+      minutesDelta: over.minutesDelta,
+      createdAt: over.createdAt ?? 1_000,
+      dayKey: over.dayKey ?? "2026-05-03",
+    };
+  }
+
+  it("balance = cloud baseline + local entries created after cloud.savedAt", () => {
+    // Local: lastSavedAt=1000, two ledger entries created after that.
+    useStore.setState({
+      ftoken: 8,
+      htoken: 5,
+      timePool: 0,
+      lastSavedAt: 1000,
+      tokenHistory: [
+        ledgerEntry({ id: "p-old", kind: "pomodoro", fDelta: 1, createdAt: 500 }),
+        ledgerEntry({ id: "p-new1", kind: "pomodoro", fDelta: 2, createdAt: 1500 }),
+        ledgerEntry({ id: "p-new2", kind: "pomodoro", fDelta: 1, createdAt: 1800 }),
+      ],
+    });
+    s().applyMergedSnapshot(
+      {
+        ftoken: 10,
+        htoken: 5,
+        timePool: 30,
+        tokenHistory: [
+          ledgerEntry({ id: "p-old", kind: "pomodoro", fDelta: 1, createdAt: 500 }),
+          ledgerEntry({ id: "cloud-1", kind: "pomodoro", fDelta: 4, createdAt: 800 }),
+        ],
+      },
+      2000,
+    );
+    // mergedF = cloud.ftoken (10) + local-new (2 + 1) = 13
+    expect(s().ftoken).toBe(13);
+    expect(s().htoken).toBe(5);
+    expect(s().timePool).toBe(30);
+    expect(s().lastSavedAt).toBe(2000);
+  });
+
+  it("id-dedups tokenHistory union; cloud entry wins on collision", () => {
+    useStore.setState({
+      lastSavedAt: 1000,
+      tokenHistory: [ledgerEntry({ id: "shared", fDelta: 1, createdAt: 500 })],
+    });
+    s().applyMergedSnapshot(
+      {
+        ftoken: 0,
+        tokenHistory: [
+          ledgerEntry({ id: "shared", fDelta: 1, createdAt: 500 }),
+          ledgerEntry({ id: "cloud-only", kind: "pomodoro", fDelta: 2, createdAt: 800 }),
+        ],
+      },
+      2000,
+    );
+    expect(s().tokenHistory.map((e) => e.id).sort()).toEqual(["cloud-only", "shared"]);
+  });
+
+  it("welcome dedup: keeps earliest welcome and reverses dropped delta from balance", () => {
+    useStore.setState({
+      ftoken: 5,
+      htoken: 10,
+      lastSavedAt: 0,
+      tokenHistory: [
+        ledgerEntry({
+          id: "w-anon",
+          kind: "welcome",
+          fDelta: 5,
+          hDelta: 10,
+          createdAt: 200,
+        }),
+      ],
+    });
+    s().applyMergedSnapshot(
+      {
+        ftoken: 5,
+        htoken: 10,
+        tokenHistory: [
+          ledgerEntry({
+            id: "w-cloud",
+            kind: "welcome",
+            fDelta: 5,
+            hDelta: 10,
+            createdAt: 100,
+          }),
+        ],
+      },
+      1000,
+    );
+    // merged ledger initially has both welcome ids; dedupWelcomeEntries
+    // collapses to earliest (w-cloud) and reports fAdjust=-5/hAdjust=-10
+    // (the dropped w-anon's deltas, negated). Balance math:
+    //   cloud (5,10) + localOnly w-anon (+5,+10) + welcome dedup (-5,-10)
+    //   = (5,10) — i.e. exactly one welcome's worth, not double.
+    expect(s().ftoken).toBe(5);
+    expect(s().htoken).toBe(10);
+    const welcomes = s().tokenHistory.filter((e) => e.kind === "welcome");
+    expect(welcomes).toHaveLength(1);
+    expect(welcomes[0].id).toBe("w-cloud");
+  });
+
+  it("dedups id-keyed collections (wishlist, kanban inbox, foodPresets)", () => {
+    useStore.setState({
+      wishlist: [
+        { id: "w-1", name: "本地", price: 10, pay: "F", why: "local", progress: 0 },
+      ],
+      foodPresets: [
+        { id: "fp-shared", name: "本地版", price: 5 },
+      ],
+      kanban: { inbox: [{ id: "k1", name: "本地任务" }], Q1: [], Q2: [], Q3: [], Q4: [] },
+    });
+    s().applyMergedSnapshot(
+      {
+        wishlist: [
+          { id: "w-1", name: "云端", price: 10, pay: "F", why: "云", progress: 0 },
+          { id: "w-2", name: "新", price: 5, pay: "H", why: "y", progress: 0 },
+        ],
+        foodPresets: [
+          { id: "fp-shared", name: "云版", price: 5 },
+          { id: "fp-cloud", name: "新", price: 8 },
+        ],
+        kanban: {
+          inbox: [{ id: "k1", name: "云端任务" }, { id: "k2", name: "k2" }],
+          Q1: [], Q2: [], Q3: [], Q4: [],
+        },
+      },
+      2000,
+    );
+    expect(s().wishlist.map((w) => w.id).sort()).toEqual(["w-1", "w-2"]);
+    expect(s().wishlist.find((w) => w.id === "w-1")?.name).toBe("云端"); // cloud wins
+    expect(s().foodPresets.map((p) => p.id).sort()).toEqual(["fp-cloud", "fp-shared"]);
+    expect(s().kanban.inbox.map((c) => c.id).sort()).toEqual(["k1", "k2"]);
+  });
+
+  it("is idempotent — re-running with the same cloud snapshot doesn't grow ledger", () => {
+    const cloud = {
+      ftoken: 5,
+      htoken: 10,
+      tokenHistory: [
+        ledgerEntry({ id: "cloud-1", fDelta: 1, createdAt: 500 }),
+      ],
+    };
+    s().applyMergedSnapshot(cloud, 1000);
+    const lenAfterFirst = s().tokenHistory.length;
+    const fAfterFirst = s().ftoken;
+    s().applyMergedSnapshot(cloud, 1000);
+    expect(s().tokenHistory.length).toBe(lenAfterFirst);
+    expect(s().ftoken).toBe(fAfterFirst);
+  });
+});
+
+// ===========================================================================
+// runRollup
+// ===========================================================================
+describe("runRollup", () => {
+  it("collapses entries older than 30 days into per-day rollup entries", () => {
+    const now = Date.now();
+    const old1 = now - 40 * 86400000;
+    const old2 = now - 41 * 86400000;
+    const recent = now - 5 * 86400000;
+    useStore.setState({
+      tokenHistory: [
+        {
+          id: "r-1",
+          kind: "pomodoro",
+          fDelta: 1,
+          hDelta: 0,
+          createdAt: recent,
+          dayKey: "2026-04-28",
+        },
+        {
+          id: "o-1",
+          kind: "pomodoro",
+          fDelta: 0.5,
+          hDelta: 0,
+          createdAt: old1,
+          dayKey: "2026-03-24",
+        },
+        {
+          id: "o-2",
+          kind: "pomodoro",
+          fDelta: 1,
+          hDelta: 0,
+          createdAt: old1 + 1000,
+          dayKey: "2026-03-24",
+        },
+        {
+          id: "o-3",
+          kind: "settle",
+          fDelta: 0,
+          hDelta: 3,
+          createdAt: old2,
+          dayKey: "2026-03-23",
+        },
+      ],
+    });
+    s().runRollup();
+    const rollups = s().tokenHistory.filter((e) => e.kind === "rollup");
+    expect(rollups).toHaveLength(2);
+    const r0324 = rollups.find((r) => r.dayKey === "2026-03-24")!;
+    expect(r0324.fDelta).toBe(1.5);
+    expect(r0324.id).toBe("rollup-2026-03-24");
+    // Recent entry preserved as-is.
+    expect(s().tokenHistory.find((e) => e.id === "r-1")).toBeTruthy();
+    // Old originals consumed.
+    expect(s().tokenHistory.find((e) => e.id === "o-1")).toBeUndefined();
+  });
+
+  it("is a no-op when nothing is older than 30 days", () => {
+    const now = Date.now();
+    useStore.setState({
+      tokenHistory: [
+        {
+          id: "r-1",
+          kind: "pomodoro",
+          fDelta: 1,
+          hDelta: 0,
+          createdAt: now - 86400000,
+          dayKey: "2026-05-02",
+        },
+      ],
+    });
+    const before = s().tokenHistory;
+    s().runRollup();
+    expect(s().tokenHistory).toEqual(before);
+  });
+});
+
+// ===========================================================================
 // reset
 // ===========================================================================
 describe("reset", () => {

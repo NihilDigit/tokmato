@@ -29,6 +29,7 @@ import type {
   TokenLedgerEntry,
 } from "./types";
 import { totalBonusF } from "./bonus";
+import { dedupWelcomeEntries, rolledUpEntries } from "./ledger";
 
 // ─────────────────────────────────────────────────────────────────────────
 // Defaults — first-run starter state; once user has data in storage, this is unused.
@@ -169,9 +170,18 @@ interface StoreActions {
    *  providers.tsx after a successful save or load. */
   markSynced: (savedAt: number) => void;
   /** Replace persisted state wholesale with a cloud snapshot, then mark
-   *  the corresponding savedAt. Used by app-open auto-load and by the
-   *  Settings "立即拉取" button. */
+   *  the corresponding savedAt. Used by the Settings "立即拉取"
+   *  escape hatch (force overwrite local with cloud). */
   applyCloudSnapshot: (snapshot: Partial<UserState>, savedAt: number) => void;
+  /** v9+ default sync path. Merges a cloud snapshot with local state:
+   *  id-dedup union for collections; balance = cloud + local entries
+   *  with createdAt > cloud.savedAt; welcome dedup via
+   *  `dedupWelcomeEntries`. Idempotent — re-running with the same cloud
+   *  snapshot is a no-op (already-deduped ledger doesn't grow). */
+  applyMergedSnapshot: (cloud: Partial<UserState>, savedAt: number) => void;
+  /** Collapse tokenHistory entries older than 30 days into per-day
+   *  rollup entries (`kind:"rollup"`, stable id). Idempotent. */
+  runRollup: () => void;
 
   // Recharge time pool with F or H
   recharge: (data: { fSpent: number; hSpent: number; minutesGained: number }) => void;
@@ -270,6 +280,89 @@ export const useStore = create<Store>()(
 
       applyCloudSnapshot: (snapshot, savedAt) =>
         set(() => ({ ...DEFAULTS, ...snapshot, lastSavedAt: savedAt })),
+
+      applyMergedSnapshot: (cloud, savedAt) =>
+        set((local) => {
+          const dedupBy = <T extends { id: string }>(
+            a: T[],
+            b: T[],
+          ): T[] => {
+            const m = new Map<string, T>();
+            for (const item of a) m.set(item.id, item);
+            for (const item of b) m.set(item.id, item); // cloud wins on collision
+            return Array.from(m.values());
+          };
+          const cloudHistory = (cloud.tokenHistory ?? []) as TokenLedgerEntry[];
+          const tokenHistoryRaw = dedupBy(local.tokenHistory, cloudHistory);
+          const { entries: tokenHistory, fAdjust, hAdjust } =
+            dedupWelcomeEntries(tokenHistoryRaw);
+          // Balance reconciliation:
+          //   cloud baseline (cloud has its own ledger + accumulated balance)
+          // + local-only entries (in local ledger but NOT in cloud ledger,
+          //   identified by id-set difference — these are local contributions
+          //   the cloud snapshot doesn't know about)
+          // + welcome dedup adjustment (negate dropped duplicate welcomes).
+          const cloudIds = new Set(cloudHistory.map((e) => e.id));
+          const localOnly = local.tokenHistory.filter((e) => !cloudIds.has(e.id));
+          let fNew = 0;
+          let hNew = 0;
+          let mNew = 0;
+          for (const e of localOnly) {
+            fNew += e.fDelta;
+            hNew += e.hDelta;
+            if (typeof e.minutesDelta === "number") mNew += e.minutesDelta;
+          }
+          const ftoken = round((cloud.ftoken ?? 0) + fNew + fAdjust);
+          const htoken = round((cloud.htoken ?? 0) + hNew + hAdjust);
+          const timePool = clamp((cloud.timePool ?? 0) + mNew);
+          const cloudKanban = cloud.kanban ?? local.kanban;
+          return {
+            ftoken,
+            htoken,
+            timePool,
+            tokenHistory: tokenHistory.slice(0, 1000),
+            pomodoroHistory: dedupBy(
+              local.pomodoroHistory,
+              (cloud.pomodoroHistory ?? []) as typeof local.pomodoroHistory,
+            ).slice(0, 500),
+            wishlist: dedupBy(local.wishlist, cloud.wishlist ?? []),
+            achievements: dedupBy(local.achievements, cloud.achievements ?? []),
+            foodPresets: dedupBy(local.foodPresets, cloud.foodPresets ?? []),
+            tags: dedupBy(local.tags, cloud.tags ?? []),
+            bonuses: dedupBy(local.bonuses, cloud.bonuses ?? []),
+            kanban: {
+              inbox: dedupBy(local.kanban.inbox, cloudKanban.inbox ?? []),
+              Q1: dedupBy(local.kanban.Q1, cloudKanban.Q1 ?? []),
+              Q2: dedupBy(local.kanban.Q2, cloudKanban.Q2 ?? []),
+              Q3: dedupBy(local.kanban.Q3, cloudKanban.Q3 ?? []),
+              Q4: dedupBy(local.kanban.Q4, cloudKanban.Q4 ?? []),
+            },
+            recentTasks: Array.from(
+              new Set([...local.recentTasks, ...(cloud.recentTasks ?? [])]),
+            ).slice(0, 5),
+            // Cloud wins for in-flight session + day metadata. The
+            // cross-device awareness layer prevents two simultaneous
+            // sessions, so a non-null cloud session reflects the truth.
+            session: cloud.session ?? null,
+            playSession: cloud.playSession ?? null,
+            activeDay: cloud.activeDay ?? local.activeDay,
+            lastSettledDate: cloud.lastSettledDate ?? local.lastSettledDate,
+            todayPomos: cloud.todayPomos ?? 0,
+            todayCountsByTag: cloud.todayCountsByTag ?? {},
+            todayFGained: cloud.todayFGained ?? 0,
+            todayHGained: cloud.todayHGained ?? 0,
+            todayPoolGained: cloud.todayPoolGained ?? 0,
+            lastSavedAt: savedAt,
+          };
+        }),
+
+      runRollup: () =>
+        set((s) => {
+          const cutoff = Date.now() - 30 * 86400 * 1000;
+          const next = rolledUpEntries(s.tokenHistory, cutoff);
+          if (next === s.tokenHistory) return s;
+          return { tokenHistory: next.slice(0, 1000) };
+        }),
 
       grantWelcomeBonus: () =>
         set((s) => {

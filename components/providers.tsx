@@ -9,6 +9,7 @@ import { selectSnapshot, useStore } from "@/lib/store";
 import { saveToCloud, loadFromCloud } from "@/app/actions/sync";
 import { cancelPushChain } from "@/app/actions/push";
 import { clearActiveSession } from "@/app/actions/active-session";
+import { recomputeBalances } from "@/lib/ledger";
 
 const AUTOSAVE_DEBOUNCE_MS = 2_000;
 
@@ -110,10 +111,13 @@ function ProviderInner({ children }: { children: React.ReactNode }) {
     });
   }, [storeReady, status]);
 
-  // ─── Auto-sync: app-open LWW load (once per auth session) ──────────────
-  // Only overwrite local when the cloud snapshot is strictly newer than
-  // what this device last in-sync'd against. `lastSavedAt = 0` (default
-  // for a brand-new device) means "accept whatever cloud has".
+  // ─── Auto-sync: app-open default-merge load (once per auth session) ───
+  // v9+ replaces the v1.x LWW wholesale-overwrite. Always merges cloud
+  // with local: id-dedup collections, balance = cloud baseline + local
+  // entries with createdAt > cloud.savedAt + welcome dedup adjust.
+  // Idempotent — re-running with the same cloud snapshot is a no-op.
+  // Settings "立即拉取" / "立即推送" remain as escape hatches for
+  // wholesale overwrite either direction.
   const autoLoadRanRef = useRef(false);
   useEffect(() => {
     if (!storeReady) return;
@@ -123,19 +127,28 @@ function ProviderInner({ children }: { children: React.ReactNode }) {
     void (async () => {
       try {
         const remote = await loadFromCloud();
-        if (!remote) return;
-        const local = useStore.getState();
-        if (remote.savedAt > local.lastSavedAt) {
-          useStore
-            .getState()
-            .applyCloudSnapshot(
-              remote.snapshot as Partial<typeof local>,
-              remote.savedAt,
-            );
-        } else {
-          // Already in sync — record it so subsequent saves don't think
-          // we're behind cloud.
-          useStore.getState().markSynced(remote.savedAt);
+        const store = useStore.getState();
+        if (remote) {
+          store.applyMergedSnapshot(
+            remote.snapshot as Partial<ReturnType<typeof useStore.getState>>,
+            remote.savedAt,
+          );
+        }
+        // Rollup runs AFTER merge so the source-of-truth for >30d
+        // entries is the deduped union of both sides.
+        useStore.getState().runRollup();
+        // Drift check — purely diagnostic for v9.
+        const after = useStore.getState();
+        const recomputed = recomputeBalances(after.tokenHistory);
+        if (
+          Math.abs(recomputed.ftoken - after.ftoken) > 0.05 ||
+          Math.abs(recomputed.htoken - after.htoken) > 0.05
+        ) {
+          // eslint-disable-next-line no-console
+          console.warn(
+            "[sync] balance drift after merge",
+            { stored: { f: after.ftoken, h: after.htoken }, recomputed },
+          );
         }
       } catch {
         // Network/auth flap — leave local untouched. The user can hit
