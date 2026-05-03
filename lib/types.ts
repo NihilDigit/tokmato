@@ -74,13 +74,32 @@ export interface PomodoroRecord {
 
 export interface TokenLedgerEntry {
   id: string;
-  kind: "welcome" | "pomodoro" | "settle";
+  /** v1.9: full transaction kinds for both income and spending.
+   *  - welcome / pomodoro / settle: positive token income (existing).
+   *  - recharge: F + H spent → time-pool minutes gained.
+   *  - food / wish: token spending on consumption / redemption.
+   *  - play: time-pool spend (negative minutesDelta) and refund (positive).
+   *  - rollup: per-day aggregate of older entries (id `rollup-{dayKey}`).
+   */
+  kind:
+    | "welcome"
+    | "pomodoro"
+    | "settle"
+    | "recharge"
+    | "food"
+    | "wish"
+    | "play"
+    | "rollup";
   fDelta: number;
   hDelta: number;
+  /** Time-pool minutes delta. Negative for spend, positive for refund. */
+  minutesDelta?: number;
   createdAt: number;
   dayKey: string;
   note?: string;
   pomodoroRecordId?: string;
+  /** Generic reference to a domain record (wishId / foodPresetId / etc). */
+  refId?: string;
 }
 
 export interface WishlistItem {

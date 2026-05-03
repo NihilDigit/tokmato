@@ -14,7 +14,10 @@ import { z } from "zod";
 // ─── Caps ─────────────────────────────────────────────────────────────
 // Generous-but-bounded so a malicious client can't dump unbounded
 // payloads into a per-user KV slot.
-export const MAX_SNAPSHOT_BYTES = 256 * 1024; // 256 KB — JSON-serialized
+export const MAX_SNAPSHOT_BYTES = 1024 * 1024; // 1 MB — JSON-serialized
+                                                // (v1.9 bumped from 256 KB to fit
+                                                // a 30-day rolling ledger + rollup
+                                                // entries beyond)
 const STR_SHORT = 200;
 const STR_MED = 500;
 const STR_LONG = 2_000;
@@ -106,13 +109,30 @@ const pomodoroRecord = z.object({
 
 const tokenLedgerEntry = z.object({
   id,
-  kind: z.enum(["welcome", "pomodoro", "settle"]),
+  // v1.9: ledger expanded to record every spending action and a daily
+  // rollup kind for entries older than the 30-day hot window.
+  kind: z.enum([
+    "welcome",
+    "pomodoro",
+    "settle",
+    "recharge",
+    "food",
+    "wish",
+    "play",
+    "rollup",
+  ]),
   fDelta: tokenAmount,
   hDelta: tokenAmount,
+  /** Time-pool minute flow. Negative for spend (recharge/play), positive
+   *  for refund. Optional — omitted by F/H-only kinds. */
+  minutesDelta: minuteAmount.optional(),
   createdAt: epochMs,
   dayKey,
   note: z.string().max(STR_MED).optional(),
   pomodoroRecordId: z.string().max(STR_SHORT).optional(),
+  /** Generic reference to a related record (wishId / foodPresetId / etc).
+   *  pomodoroRecordId stays as a v1.x dedicated field for back-compat. */
+  refId: z.string().max(STR_SHORT).optional(),
 });
 
 const wishlistItem = z.object({

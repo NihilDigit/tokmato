@@ -97,9 +97,10 @@ describeIf("sync server actions (real Redis)", async () => {
   });
 
   it("PAYLOAD_TOO_LARGE rejects oversized snapshots before parsing", async () => {
+    // v1.9 bumped the cap to 1 MB. Pad past it to trigger the guard.
     const bloated = {
       ...validSnapshot(),
-      recentTasks: [new Array(300_000).fill("x").join("")],
+      recentTasks: [new Array(1_100_000).fill("x").join("")],
     };
     await expect(saveToCloud(bloated)).rejects.toThrow("PAYLOAD_TOO_LARGE");
     expect(await redis!.get(stateKey)).toBeNull();

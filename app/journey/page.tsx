@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Download } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { todayKey, useStore } from "@/lib/store";
@@ -45,29 +45,45 @@ export default function JourneyPage() {
     return keys;
   }, []);
 
-  const recentRecords = useMemo(
+  // "all" = no tag filter; otherwise filter pomodoros by tag id.
+  // Distribution donut still computes from the unfiltered set so the
+  // breakdown always shows the full picture; heatmap + recent strings
+  // narrow to the selected tag.
+  const [activeTag, setActiveTag] = useState<string>("all");
+
+  const recentRecordsAll = useMemo(
     () => pomodoroHistory.filter((r) => last30Keys.includes(r.dayKey)),
     [last30Keys, pomodoroHistory],
+  );
+  const recentRecords = useMemo(
+    () =>
+      activeTag === "all"
+        ? recentRecordsAll
+        : recentRecordsAll.filter((r) => r.tag === activeTag),
+    [recentRecordsAll, activeTag],
   );
   const recentTokens = useMemo(
     () => tokenHistory.filter((r) => last30Keys.includes(r.dayKey)),
     [last30Keys, tokenHistory],
   );
 
+  // Stats + distribution always reflect the full 30 days regardless of
+  // the active tag filter — they're the "at a glance" summary, not the
+  // narrowed view.
   const stats = {
-    totalPomos: recentRecords.reduce((sum, r) => sum + r.count, 0),
-    totalHours: recentRecords.reduce((sum, r) => sum + r.minutes, 0) / 60,
+    totalPomos: recentRecordsAll.reduce((sum, r) => sum + r.count, 0),
+    totalHours: recentRecordsAll.reduce((sum, r) => sum + r.minutes, 0) / 60,
     totalF: recentTokens.reduce((sum, r) => sum + Math.max(0, r.fDelta), 0),
     totalH: recentTokens.reduce((sum, r) => sum + Math.max(0, r.hDelta), 0),
-    longestStreak: longestStreak(last30Keys, recentRecords),
+    longestStreak: longestStreak(last30Keys, recentRecordsAll),
   };
 
   const distribution: { tag: TagConfig; pct: number }[] = useMemo(() => {
-    const total = recentRecords.reduce((sum, r) => sum + r.count, 0);
+    const total = recentRecordsAll.reduce((sum, r) => sum + r.count, 0);
     if (total <= 0) {
       return tags.map((t) => ({ tag: t, pct: 0 }));
     }
-    const counts: Record<string, number> = recentRecords.reduce(
+    const counts: Record<string, number> = recentRecordsAll.reduce(
       (acc: Record<string, number>, r) => {
         acc[r.tag] = (acc[r.tag] ?? 0) + r.count;
         return acc;
@@ -78,7 +94,7 @@ export default function JourneyPage() {
       tag: t,
       pct: Math.round(((counts[t.id] ?? 0) / total) * 100),
     }));
-  }, [recentRecords, tags]);
+  }, [recentRecordsAll, tags]);
 
   const heatmapCounts = useMemo(() => {
     const byDay = new Map<string, number>();
@@ -93,6 +109,12 @@ export default function JourneyPage() {
     for (const t of tags) m.set(t.id, t);
     return m;
   }, [tags]);
+
+  const heatmapToneClass = useMemo(() => {
+    if (activeTag === "all") return "bg-tomato";
+    const t = tagById.get(activeTag);
+    return t ? TAG_BG_CLASSES[t.color] : "bg-tomato";
+  }, [activeTag, tagById]);
 
   const recentStrings = recentRecords.slice(0, 20).map((record) => ({
     task: record.task,
@@ -140,34 +162,44 @@ export default function JourneyPage() {
       <section className="flex flex-col gap-4">
         <SectionHead title="30 天的痕迹" />
 
-        {/* Tag filter row — visual only for now. */}
+        {/* Tag filter — narrows heatmap + recent strings to one tag. */}
         <div className="flex flex-wrap gap-1.5">
           <button
             type="button"
+            onClick={() => setActiveTag("all")}
             className={cn(
               "rounded-full border px-3 py-1 text-xs transition",
-              "border-transparent bg-ink text-paper",
+              activeTag === "all"
+                ? "border-transparent bg-ink text-paper"
+                : "border-rule text-ink-3 hover:border-ink/30 hover:text-ink",
             )}
           >
             全部
           </button>
-          {tags.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              className={cn(
-                "rounded-full border border-rule px-3 py-1 text-xs font-mono text-ink-3 transition hover:border-ink/30 hover:text-ink",
-              )}
-            >
-              {t.label}
-            </button>
-          ))}
+          {tags.map((t) => {
+            const active = activeTag === t.id;
+            return (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => setActiveTag(t.id)}
+                className={cn(
+                  "rounded-full border px-3 py-1 text-xs font-mono transition",
+                  active
+                    ? cn("border-transparent", TAG_CHIP_CLASSES[t.color])
+                    : "border-rule text-ink-3 hover:border-ink/30 hover:text-ink",
+                )}
+              >
+                {t.label}
+              </button>
+            );
+          })}
         </div>
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          {/* Left: heatmap */}
+          {/* Left: heatmap (tone follows the active filter) */}
           <div className="rounded-xl border border-rule bg-paper p-5">
-            <Heatmap toneClass="bg-tomato" counts={heatmapCounts} />
+            <Heatmap toneClass={heatmapToneClass} counts={heatmapCounts} />
             <div className="mono mt-3.5 flex items-center justify-between text-[11px] text-ink-mute">
               <span>30 天前</span>
               <div className="flex items-center gap-1.5">
@@ -175,7 +207,7 @@ export default function JourneyPage() {
                 {HEATMAP_OPACITY.map((op, i) => (
                   <span
                     key={i}
-                    className={cn("h-2.5 w-2.5 rounded-[2px] bg-tomato")}
+                    className={cn("h-2.5 w-2.5 rounded-[2px]", heatmapToneClass)}
                     style={{ opacity: op / 100 }}
                   />
                 ))}

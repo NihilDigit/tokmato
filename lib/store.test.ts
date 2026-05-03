@@ -445,6 +445,19 @@ describe("settle and spending", () => {
     s().spendFood({ name: "夜宵", price: 20, hSpent: 5 });
     expect(s().htoken).toBe(0);
   });
+
+  it("spendFood writes a `food` ledger entry with item name as note", () => {
+    s().settle({ fGained: 0, hGained: 5 });
+    const before = s().tokenHistory.length;
+    s().spendFood({ name: "咖啡", price: 12, hSpent: 1.5 });
+    expect(s().tokenHistory.length).toBe(before + 1);
+    expect(s().tokenHistory[0]).toMatchObject({
+      kind: "food",
+      fDelta: 0,
+      hDelta: -1.5,
+      note: "咖啡",
+    });
+  });
 });
 
 // ===========================================================================
@@ -484,6 +497,25 @@ describe("recharge", () => {
     expect(s().htoken).toBe(0);
     expect(s().timePool).toBe(0);
     expect(s().todayPoolGained).toBe(0);
+  });
+
+  it("writes a `recharge` ledger entry on success with negative F/H + positive minutesDelta", () => {
+    s().settle({ fGained: 5, hGained: 5 });
+    const before = s().tokenHistory.length;
+    s().recharge({ fSpent: 2, hSpent: 1, minutesGained: 30 });
+    expect(s().tokenHistory.length).toBe(before + 1);
+    expect(s().tokenHistory[0]).toMatchObject({
+      kind: "recharge",
+      fDelta: -2,
+      hDelta: -1,
+      minutesDelta: 30,
+    });
+  });
+
+  it("writes no ledger entry when recharge is rejected (insufficient balance)", () => {
+    const before = s().tokenHistory.length;
+    s().recharge({ fSpent: 5, hSpent: 5, minutesGained: 60 });
+    expect(s().tokenHistory.length).toBe(before);
   });
 });
 
@@ -562,6 +594,24 @@ describe("redeemWish", () => {
     expect(s().wishlist.find((w) => w.id === id)).toBeUndefined();
     expect(s().achievements[0].id).toBe(id);
     expect(s().achievements[0].name).toBe("Switch 2");
+  });
+
+  it("writes a `wish` ledger entry on success with refId pointing at the wish", () => {
+    s().startSession({ task: "刷题", tag: "cs", type: "input" });
+    s().endSession({ completedCount: 10 });
+    s().settle({ fGained: 0, hGained: 5 });
+    const id = seedWish({ name: "Switch 2", price: 200, why: "fun" });
+    const before = s().tokenHistory.length;
+
+    s().redeemWish({ wishId: id, fSpent: 6, hSpent: 2 });
+    expect(s().tokenHistory.length).toBe(before + 1);
+    expect(s().tokenHistory[0]).toMatchObject({
+      kind: "wish",
+      fDelta: -6,
+      hDelta: -2,
+      note: "Switch 2",
+      refId: id,
+    });
   });
 });
 
@@ -665,6 +715,45 @@ describe("play session lifecycle", () => {
     s().endPlay({ refundMinutes: 5 });
     expect(s().playSession).toBe(null);
     expect(s().timePool).toBe(5);
+  });
+
+  it("startPlay writes a `play` ledger entry with negative minutesDelta when actualCost > 0", () => {
+    s().recharge({ fSpent: 0, hSpent: 0, minutesGained: 20 });
+    const before = s().tokenHistory.length;
+    s().startPlay({ type: "active", minutes: 15 });
+    expect(s().tokenHistory.length).toBe(before + 1);
+    expect(s().tokenHistory[0]).toMatchObject({
+      kind: "play",
+      minutesDelta: -15,
+      note: "active",
+    });
+  });
+
+  it("startPlay does NOT write a ledger entry when actualCost is 0 (empty pool)", () => {
+    const before = s().tokenHistory.length;
+    s().startPlay({ type: "passive", minutes: 30, costMinutes: 30 });
+    expect(s().tokenHistory.length).toBe(before);
+  });
+
+  it("endPlay writes a `play` refund ledger entry with positive minutesDelta", () => {
+    s().recharge({ fSpent: 0, hSpent: 0, minutesGained: 30 });
+    s().startPlay({ type: "active", minutes: 30, costMinutes: 30 });
+    const beforeRefund = s().tokenHistory.length;
+    s().endPlay({ refundMinutes: 5 });
+    expect(s().tokenHistory.length).toBe(beforeRefund + 1);
+    expect(s().tokenHistory[0]).toMatchObject({
+      kind: "play",
+      minutesDelta: 5,
+      note: "refund",
+    });
+  });
+
+  it("endPlay does NOT write a refund ledger entry when refundMinutes is 0", () => {
+    s().recharge({ fSpent: 0, hSpent: 0, minutesGained: 30 });
+    s().startPlay({ type: "active", minutes: 30, costMinutes: 30 });
+    const before = s().tokenHistory.length;
+    s().endPlay();
+    expect(s().tokenHistory.length).toBe(before);
   });
 });
 

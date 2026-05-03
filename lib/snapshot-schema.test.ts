@@ -211,11 +211,64 @@ describe("persistedSnapshotSchema — strictness", () => {
 });
 
 describe("MAX_SNAPSHOT_BYTES", () => {
-  it("is set to 256 KB", () => {
-    expect(MAX_SNAPSHOT_BYTES).toBe(256 * 1024);
+  it("is set to 1 MB (v1.9 bumped from 256 KB to fit 30-day rolling ledger + rollups)", () => {
+    expect(MAX_SNAPSHOT_BYTES).toBe(1024 * 1024);
   });
 
   it("a minimal snapshot serializes well under the cap", () => {
     expect(JSON.stringify(validSnapshot()).length).toBeLessThan(MAX_SNAPSHOT_BYTES);
+  });
+});
+
+describe("tokenLedgerEntry — v1.9 expanded kinds", () => {
+  it("accepts every new kind: recharge, food, wish, play, rollup", () => {
+    const newKinds = ["recharge", "food", "wish", "play", "rollup"] as const;
+    for (const kind of newKinds) {
+      const snap = validSnapshot() as Record<string, unknown>;
+      snap.tokenHistory = [
+        {
+          id: `t-1-${kind}`,
+          kind,
+          fDelta: 0,
+          hDelta: 0,
+          createdAt: 1,
+          dayKey: "2026-05-03",
+        },
+      ];
+      const r = persistedSnapshotSchema.safeParse(snap);
+      expect(r.success).toBe(true);
+    }
+  });
+
+  it("accepts minutesDelta as optional", () => {
+    const snap = validSnapshot() as Record<string, unknown>;
+    snap.tokenHistory = [
+      {
+        id: "t-2",
+        kind: "play",
+        fDelta: 0,
+        hDelta: 0,
+        minutesDelta: -25,
+        createdAt: 1,
+        dayKey: "2026-05-03",
+      },
+    ];
+    expect(persistedSnapshotSchema.safeParse(snap).success).toBe(true);
+  });
+
+  it("accepts refId as optional", () => {
+    const snap = validSnapshot() as Record<string, unknown>;
+    snap.tokenHistory = [
+      {
+        id: "t-3",
+        kind: "wish",
+        fDelta: -5,
+        hDelta: -2,
+        createdAt: 1,
+        dayKey: "2026-05-03",
+        refId: "w-switch",
+      },
+    ];
+    expect(persistedSnapshotSchema.safeParse(snap).success).toBe(true);
   });
 });

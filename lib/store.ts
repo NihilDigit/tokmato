@@ -303,12 +303,24 @@ export const useStore = create<Store>()(
           // Mirrors the redeemWish guard.
           if (fSpent > s.ftoken || hSpent > s.htoken) return s;
           const daily = normalizeDay(s);
+          const createdAt = Date.now();
+          const ledgerEntry: TokenLedgerEntry = {
+            id: `t-${createdAt}-${Math.random().toString(36).slice(2, 6)}`,
+            kind: "recharge",
+            fDelta: -fSpent,
+            hDelta: -hSpent,
+            minutesDelta: minutesGained,
+            createdAt,
+            dayKey: todayKey(new Date(createdAt)),
+            note: `recharge ${minutesGained}min`,
+          };
           return {
             ...daily,
             ftoken: round(clamp(s.ftoken - fSpent)),
             htoken: round(clamp(s.htoken - hSpent)),
             timePool: clamp(s.timePool + minutesGained),
             todayPoolGained: (daily.todayPoolGained ?? s.todayPoolGained ?? 0) + minutesGained,
+            tokenHistory: [ledgerEntry, ...(s.tokenHistory ?? [])].slice(0, 1000),
           };
         }),
 
@@ -318,30 +330,81 @@ export const useStore = create<Store>()(
           // ends early. clamp avoids going negative if budget changed.
           const requestedCost = costMinutes ?? minutes;
           const actualCost = Math.min(requestedCost, s.timePool);
+          const startedAt = Date.now();
           const playSession: PlaySession = {
             type,
             totalMinutes: minutes,
             costMinutes: actualCost,
-            startedAt: Date.now(),
+            startedAt,
           };
+          const ledgerEntry: TokenLedgerEntry | null =
+            actualCost > 0
+              ? {
+                  id: `t-${startedAt}-${Math.random().toString(36).slice(2, 6)}`,
+                  kind: "play",
+                  fDelta: 0,
+                  hDelta: 0,
+                  minutesDelta: -actualCost,
+                  createdAt: startedAt,
+                  dayKey: todayKey(new Date(startedAt)),
+                  note: type,
+                }
+              : null;
           return {
             ...normalizeDay(s),
             playSession,
             timePool: clamp(s.timePool - actualCost),
+            tokenHistory: ledgerEntry
+              ? [ledgerEntry, ...(s.tokenHistory ?? [])].slice(0, 1000)
+              : s.tokenHistory ?? [],
           };
         }),
 
       endPlay: (data) =>
-        set((s) => ({
-          playSession: null,
-          timePool: clamp(s.timePool + (data?.refundMinutes ?? 0)),
-        })),
+        set((s) => {
+          const refund = data?.refundMinutes ?? 0;
+          if (refund <= 0) {
+            return {
+              playSession: null,
+              timePool: clamp(s.timePool + refund),
+            };
+          }
+          const createdAt = Date.now();
+          const ledgerEntry: TokenLedgerEntry = {
+            id: `t-${createdAt}-${Math.random().toString(36).slice(2, 6)}`,
+            kind: "play",
+            fDelta: 0,
+            hDelta: 0,
+            minutesDelta: refund,
+            createdAt,
+            dayKey: todayKey(new Date(createdAt)),
+            note: "refund",
+          };
+          return {
+            playSession: null,
+            timePool: clamp(s.timePool + refund),
+            tokenHistory: [ledgerEntry, ...(s.tokenHistory ?? [])].slice(0, 1000),
+          };
+        }),
 
-      spendFood: ({ hSpent }) =>
-        set((s) => ({
-          ...normalizeDay(s),
-          htoken: round(clamp(s.htoken - hSpent)),
-        })),
+      spendFood: ({ name, hSpent }) =>
+        set((s) => {
+          const createdAt = Date.now();
+          const ledgerEntry: TokenLedgerEntry = {
+            id: `t-${createdAt}-${Math.random().toString(36).slice(2, 6)}`,
+            kind: "food",
+            fDelta: 0,
+            hDelta: -hSpent,
+            createdAt,
+            dayKey: todayKey(new Date(createdAt)),
+            note: name,
+          };
+          return {
+            ...normalizeDay(s),
+            htoken: round(clamp(s.htoken - hSpent)),
+            tokenHistory: [ledgerEntry, ...(s.tokenHistory ?? [])].slice(0, 1000),
+          };
+        }),
 
       startSession: ({ task, tag, type }) => {
         const now = Date.now();
@@ -604,6 +667,17 @@ export const useStore = create<Store>()(
           const wish = s.wishlist.find((w) => w.id === wishId);
           if (!wish) return s;
           if (fSpent > s.ftoken || hSpent > s.htoken) return s; // guard
+          const createdAt = Date.now();
+          const ledgerEntry: TokenLedgerEntry = {
+            id: `t-${createdAt}-${Math.random().toString(36).slice(2, 6)}`,
+            kind: "wish",
+            fDelta: -fSpent,
+            hDelta: -hSpent,
+            createdAt,
+            dayKey: todayKey(new Date(createdAt)),
+            note: wish.name,
+            refId: wishId,
+          };
           return {
             ...daily,
             ftoken: round(clamp(s.ftoken - fSpent)),
@@ -613,6 +687,7 @@ export const useStore = create<Store>()(
               { id: wish.id, name: wish.name, price: wish.price, date: todayKey(), why: wish.why },
               ...s.achievements,
             ],
+            tokenHistory: [ledgerEntry, ...(s.tokenHistory ?? [])].slice(0, 1000),
           };
         }),
 
