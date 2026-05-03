@@ -17,6 +17,7 @@ import { Coffee, Pencil, Trash2, Check, Plus } from "lucide-react";
 import { ResponsiveSheet } from "@/components/ui/responsive-sheet";
 import { cn } from "@/lib/utils";
 import { useStore } from "@/lib/store";
+import { useShallow } from "zustand/react/shallow";
 
 const FOOD_H_RATE = 5;
 const PRICE_TO_H = (price: number) => Math.round((price / FOOD_H_RATE) * 100) / 100;
@@ -38,10 +39,14 @@ export function FoodSheet({
   htoken,
   onConfirm,
 }: FoodSheetProps) {
-  const presets = useStore((s) => s.foodPresets);
-  const addPreset = useStore((s) => s.addFoodPreset);
-  const updatePreset = useStore((s) => s.updateFoodPreset);
-  const removePreset = useStore((s) => s.removeFoodPreset);
+  const { presets, addPreset, updatePreset, removePreset } = useStore(
+    useShallow((s) => ({
+      presets: s.foodPresets,
+      addPreset: s.addFoodPreset,
+      updatePreset: s.updateFoodPreset,
+      removePreset: s.removeFoodPreset,
+    })),
+  );
 
   const [tab, setTab] = useState<Tab>("preset");
   const [editing, setEditing] = useState(false);

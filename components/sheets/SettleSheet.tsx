@@ -27,6 +27,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ResponsiveSheet } from "@/components/ui/responsive-sheet";
 import { useStore, yesterdayKey } from "@/lib/store";
+import { useShallow } from "zustand/react/shallow";
 import { enumerateTiers } from "@/lib/bonus";
 import { TAG_BG_CLASSES, TAG_CHIP_CLASSES } from "@/lib/tag-colors";
 import type { BonusConfig, TagConfig } from "@/lib/types";
@@ -269,9 +270,13 @@ function RecapStep({
   // Pull yesterday's (the day being settled) data from the persisted
   // history. Math F was credited in real time inside endSession — this
   // step is purely retrospective; no new tokens are awarded here.
-  const pomodoroHistory = useStore((s) => s.pomodoroHistory);
-  const tags = useStore((s) => s.tags);
-  const bonuses = useStore((s) => s.bonuses);
+  const { pomodoroHistory, tags, bonuses } = useStore(
+    useShallow((s) => ({
+      pomodoroHistory: s.pomodoroHistory,
+      tags: s.tags,
+      bonuses: s.bonuses,
+    })),
+  );
   const yKey = useMemo(() => yesterdayKey(), []);
   const yesterdays = useMemo(
     () => pomodoroHistory.filter((p) => p.dayKey === yKey),

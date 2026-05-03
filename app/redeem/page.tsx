@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { Plus } from "lucide-react";
 import { PoolSheet } from "@/components/sheets/PoolSheet";
 import { PlaySheet } from "@/components/sheets/PlaySheet";
@@ -14,18 +15,34 @@ type Wish = { id: string; name: string; price: number; pay: Pay; why: string; pr
 type Achievement = { id: string; name: string; price: number; date: string; why: string };
 
 export default function RedeemPage() {
-  // Live state from store
-  const ftoken = useStore((s) => s.ftoken);
-  const htoken = useStore((s) => s.htoken);
-  const timePool = useStore((s) => s.timePool);
-  const wishlist = useStore((s) => s.wishlist) as Wish[];
-  const achievements = useStore((s) => s.achievements) as Achievement[];
-  const recharge = useStore((s) => s.recharge);
-  const startPlay = useStore((s) => s.startPlay);
-  const spendFood = useStore((s) => s.spendFood);
-  const redeemWish = useStore((s) => s.redeemWish);
-  const addWish = useStore((s) => s.addWish);
-  const removeWish = useStore((s) => s.removeWish);
+  // Single shallow-equal subscription replaces 11 separate selectors.
+  const {
+    ftoken,
+    htoken,
+    timePool,
+    wishlist,
+    achievements,
+    recharge,
+    startPlay,
+    spendFood,
+    redeemWish,
+    addWish,
+    removeWish,
+  } = useStore(
+    useShallow((s) => ({
+      ftoken: s.ftoken,
+      htoken: s.htoken,
+      timePool: s.timePool,
+      wishlist: s.wishlist as Wish[],
+      achievements: s.achievements as Achievement[],
+      recharge: s.recharge,
+      startPlay: s.startPlay,
+      spendFood: s.spendFood,
+      redeemWish: s.redeemWish,
+      addWish: s.addWish,
+      removeWish: s.removeWish,
+    })),
+  );
 
   const fYuan = ftoken * 5;
   const hWishYuan = htoken * 10;

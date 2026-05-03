@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { ChevronDown, ChevronRight, Download } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { todayKey, yesterdayKey, useStore } from "@/lib/store";
@@ -38,10 +39,14 @@ const TAG_FILL_VAR: Record<TagColor, string> = {
 };
 
 export default function JourneyPage() {
-  const todayPomos = useStore((s) => s.todayPomos);
-  const pomodoroHistory = useStore((s) => s.pomodoroHistory);
-  const tokenHistory = useStore((s) => s.tokenHistory);
-  const tags = useStore((s) => s.tags);
+  const { todayPomos, pomodoroHistory, tokenHistory, tags } = useStore(
+    useShallow((s) => ({
+      todayPomos: s.todayPomos,
+      pomodoroHistory: s.pomodoroHistory,
+      tokenHistory: s.tokenHistory,
+      tags: s.tags,
+    })),
+  );
   void todayPomos;
 
   const last30Keys = useMemo(() => {
@@ -313,8 +318,12 @@ export default function JourneyPage() {
 // ─────────────────────────────────────────────────────────────────────────
 
 function LedgerCompactSection() {
-  const tokenHistory = useStore((s) => s.tokenHistory);
-  const tags = useStore((s) => s.tags);
+  const { tokenHistory, tags } = useStore(
+    useShallow((s) => ({
+      tokenHistory: s.tokenHistory,
+      tags: s.tags,
+    })),
+  );
   const tagsById = useMemo(() => {
     const m = new Map<string, TagConfig>();
     for (const t of tags) m.set(t.id, t);

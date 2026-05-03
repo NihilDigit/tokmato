@@ -22,6 +22,7 @@ import {
 import { useSession, signIn, signOut } from "next-auth/react";
 import { useTheme } from "@/components/theme-provider";
 import { selectSnapshot, useStore } from "@/lib/store";
+import { useShallow } from "zustand/react/shallow";
 import { saveToCloud, loadFromCloud } from "@/app/actions/sync";
 import { WelcomeGuideSheet } from "@/components/sheets/WelcomeGuideSheet";
 import { EditTagSheet } from "@/components/sheets/EditTagSheet";
@@ -68,21 +69,35 @@ const THEME_OPTIONS: {
 export default function SettingsPage() {
   const { theme, setTheme, resolvedTheme } = useTheme();
   const { data: session, status } = useSession();
-  const resetStore = useStore((s) => s.reset);
 
   const [syncStatus, setSyncStatus] = useState<SyncStatus>("idle");
   const [syncMsg, setSyncMsg] = useState<string>("");
   const [guideOpen, setGuideOpen] = useState(false);
 
-  // Tag / Bonus management
-  const tags = useStore((s) => s.tags);
-  const bonuses = useStore((s) => s.bonuses);
-  const addTag = useStore((s) => s.addTag);
-  const updateTag = useStore((s) => s.updateTag);
-  const removeTag = useStore((s) => s.removeTag);
-  const addBonus = useStore((s) => s.addBonus);
-  const updateBonus = useStore((s) => s.updateBonus);
-  const removeBonus = useStore((s) => s.removeBonus);
+  // Single shallow-equal subscription replaces 9 separate selectors.
+  const {
+    resetStore,
+    tags,
+    bonuses,
+    addTag,
+    updateTag,
+    removeTag,
+    addBonus,
+    updateBonus,
+    removeBonus,
+  } = useStore(
+    useShallow((s) => ({
+      resetStore: s.reset,
+      tags: s.tags,
+      bonuses: s.bonuses,
+      addTag: s.addTag,
+      updateTag: s.updateTag,
+      removeTag: s.removeTag,
+      addBonus: s.addBonus,
+      updateBonus: s.updateBonus,
+      removeBonus: s.removeBonus,
+    })),
+  );
 
   const [tagSheetOpen, setTagSheetOpen] = useState(false);
   const [tagEditing, setTagEditing] = useState<TagConfig | null>(null);

@@ -12,6 +12,7 @@
  */
 
 import { useMemo, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { ResponsiveSheet } from "@/components/ui/responsive-sheet";
 import { todayKey, yesterdayKey, useStore } from "@/lib/store";
@@ -32,8 +33,9 @@ export interface LedgerSheetProps {
 type Filter = "all" | "income" | "spend";
 
 export function LedgerSheet({ open, onOpenChange }: LedgerSheetProps) {
-  const tokenHistory = useStore((s) => s.tokenHistory);
-  const tags = useStore((s) => s.tags);
+  const { tokenHistory, tags } = useStore(
+    useShallow((s) => ({ tokenHistory: s.tokenHistory, tags: s.tags })),
+  );
   const [filter, setFilter] = useState<Filter>("all");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 

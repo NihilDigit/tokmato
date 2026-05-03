@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { memo, useMemo, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { Play } from "lucide-react";
 import { StartSheet } from "@/components/sheets/StartSheet";
 import { SettleSheet } from "@/components/sheets/SettleSheet";
@@ -21,25 +22,51 @@ import { cn } from "@/lib/utils";
 const POMO_MS = 25 * 60 * 1000;
 
 export default function HomePage() {
-  // Live state from store
-  const session = useStore((s) => s.session);
-  const ftoken = useStore((s) => s.ftoken);
-  const htoken = useStore((s) => s.htoken);
-  const timePool = useStore((s) => s.timePool);
-  const todayPomos = useStore((s) => s.todayPomos);
-  const todayCountsByTag = useStore((s) => s.todayCountsByTag);
-  const tags = useStore((s) => s.tags);
-  const bonuses = useStore((s) => s.bonuses);
-  const todayFGained = useStore((s) => s.todayFGained);
-  const todayHGained = useStore((s) => s.todayHGained);
-  const todayPoolGained = useStore((s) => s.todayPoolGained);
-  const recentTasks = useStore((s) => s.recentTasks);
-  const lastSettledDate = useStore((s) => s.lastSettledDate);
-  const settleAction = useStore((s) => s.settle);
-  const startSession = useStore((s) => s.startSession);
-  const endSession = useStore((s) => s.endSession);
-  const moveKanbanCard = useStore((s) => s.moveKanbanCard);
-  const addKanbanCard = useStore((s) => s.addKanbanCard);
+  // Single shallow-equal subscription: any one of these fields changing
+  // re-renders the page; mutations elsewhere in the store don't. Replaces
+  // 17 separate `useStore(s => s.foo)` calls that each forced a render
+  // cycle on any state change.
+  const {
+    session,
+    ftoken,
+    htoken,
+    timePool,
+    todayPomos,
+    todayCountsByTag,
+    tags,
+    bonuses,
+    todayFGained,
+    todayHGained,
+    todayPoolGained,
+    recentTasks,
+    lastSettledDate,
+    settleAction,
+    startSession,
+    endSession,
+    moveKanbanCard,
+    addKanbanCard,
+  } = useStore(
+    useShallow((s) => ({
+      session: s.session,
+      ftoken: s.ftoken,
+      htoken: s.htoken,
+      timePool: s.timePool,
+      todayPomos: s.todayPomos,
+      todayCountsByTag: s.todayCountsByTag,
+      tags: s.tags,
+      bonuses: s.bonuses,
+      todayFGained: s.todayFGained,
+      todayHGained: s.todayHGained,
+      todayPoolGained: s.todayPoolGained,
+      recentTasks: s.recentTasks,
+      lastSettledDate: s.lastSettledDate,
+      settleAction: s.settle,
+      startSession: s.startSession,
+      endSession: s.endSession,
+      moveKanbanCard: s.moveKanbanCard,
+      addKanbanCard: s.addKanbanCard,
+    })),
+  );
 
   // ─── Hook calls (must run unconditionally on every render) ─────────────
   const [openStart, setOpenStart] = useState(false);
@@ -257,7 +284,7 @@ function BalanceCell({
   );
 }
 
-function BonusProgressCard({
+const BonusProgressCard = memo(function BonusProgressCard({
   bonus,
   count,
   tag,
@@ -266,18 +293,22 @@ function BonusProgressCard({
   count: number;
   tag: TagConfig | undefined;
 }) {
-  const tiers = enumerateTiers(bonus, count);
+  // Tier set + ladder cells are pure derivations of (bonus, count) —
+  // memoizing on those keys avoids recomputing on every parent render
+  // (every 250 ms tick during a running session, etc.).
+  const { tiers, maxCells, milestoneSet } = useMemo(() => {
+    const t = enumerateTiers(bonus, count);
+    const cells = Math.max(
+      bonus.threshold + 2 * Math.max(bonus.step, 1),
+      count + 2,
+    );
+    return { tiers: t, maxCells: cells, milestoneSet: new Set(t.map((x) => x.pomos)) };
+  }, [bonus, count]);
+  void tiers;
+  const hint = useMemo(() => nextBonusHint(bonus, count), [bonus, count]);
   const fillBg = tag ? TAG_BG_CLASSES[tag.color] : "bg-ink";
   const labelText = tag ? TAG_TEXT_CLASSES[tag.color] : "text-ink-3";
   const tagLabel = tag?.label ?? bonus.tagId;
-  // Visual ladder: cells from 1..maxCells, where maxCells covers up to
-  // two tiers ahead of the current count (so the user always sees the
-  // next milestone they're working toward).
-  const maxCells = Math.max(
-    bonus.threshold + 2 * Math.max(bonus.step, 1),
-    count + 2,
-  );
-  const milestoneSet = new Set(tiers.map((t) => t.pomos));
   return (
     <div className="rounded-xl border border-rule bg-paper p-5">
       <div className={cn("smallcaps mb-2", labelText)}>
@@ -287,9 +318,7 @@ function BonusProgressCard({
         <span className="serif text-stat leading-none">{count}</span>
         <span className="text-sm text-ink-3">个 {tagLabel} 番茄</span>
       </div>
-      <div className="mt-3 text-[13px] leading-relaxed text-ink-2">
-        {nextBonusHint(bonus, count)}
-      </div>
+      <div className="mt-3 text-[13px] leading-relaxed text-ink-2">{hint}</div>
       <div className="mt-4 flex gap-1">
         {Array.from({ length: maxCells }, (_, i) => i + 1).map((i) => {
           const isMilestone = milestoneSet.has(i);
@@ -311,4 +340,4 @@ function BonusProgressCard({
       </div>
     </div>
   );
-}
+});
