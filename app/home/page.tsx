@@ -43,7 +43,6 @@ export default function HomePage() {
     settleAction,
     startSession,
     endSession,
-    moveKanbanCard,
     addKanbanCard,
   } = useStore(
     useShallow((s) => ({
@@ -63,7 +62,6 @@ export default function HomePage() {
       settleAction: s.settle,
       startSession: s.startSession,
       endSession: s.endSession,
-      moveKanbanCard: s.moveKanbanCard,
       addKanbanCard: s.addKanbanCard,
     })),
   );
@@ -73,9 +71,6 @@ export default function HomePage() {
   const [openSettle, setOpenSettle] = useState(false);
   const [initialTask, setInitialTask] = useState<string | undefined>(undefined);
   const { remoteActive } = useActiveSession();
-
-  // void to suppress unused-when-no-session warning
-  void moveKanbanCard;
 
   // ─── Running state — conditional render after hooks ────────────────────
   if (session) {
@@ -228,7 +223,6 @@ export default function HomePage() {
       <SettleSheet
         open={openSettle}
         onOpenChange={setOpenSettle}
-        isFirstTime={!lastSettledDate}
         onConfirm={(d) => {
           settleAction(d);
           setOpenSettle(false);
@@ -272,15 +266,17 @@ function BalanceCell({
   hint: string;
   color: string;
 }) {
+  // <dl> gives screen readers a "term / definition" pair so the kicker
+  // is announced as the field name and the numeric value as its value.
   return (
-    <div className="flex flex-col gap-1.5 bg-paper p-5">
-      <div className={`smallcaps ${color}`}>{kicker}</div>
-      <div className="flex items-baseline gap-2">
+    <dl className="flex flex-col gap-1.5 bg-paper p-5">
+      <dt className={`smallcaps ${color}`}>{kicker}</dt>
+      <dd className="flex items-baseline gap-2">
         <span className="serif text-stat leading-none">{value}</span>
         <span className="text-sm text-ink-3">{unit}</span>
-      </div>
-      <div className="mono text-[13px] leading-snug text-ink-3">{hint}</div>
-    </div>
+      </dd>
+      <dd className="mono text-[13px] leading-snug text-ink-3">{hint}</dd>
+    </dl>
   );
 }
 
@@ -296,15 +292,14 @@ const BonusProgressCard = memo(function BonusProgressCard({
   // Tier set + ladder cells are pure derivations of (bonus, count) —
   // memoizing on those keys avoids recomputing on every parent render
   // (every 250 ms tick during a running session, etc.).
-  const { tiers, maxCells, milestoneSet } = useMemo(() => {
+  const { maxCells, milestoneSet } = useMemo(() => {
     const t = enumerateTiers(bonus, count);
     const cells = Math.max(
       bonus.threshold + 2 * Math.max(bonus.step, 1),
       count + 2,
     );
-    return { tiers: t, maxCells: cells, milestoneSet: new Set(t.map((x) => x.pomos)) };
+    return { maxCells: cells, milestoneSet: new Set(t.map((x) => x.pomos)) };
   }, [bonus, count]);
-  void tiers;
   const hint = useMemo(() => nextBonusHint(bonus, count), [bonus, count]);
   const fillBg = tag ? TAG_BG_CLASSES[tag.color] : "bg-ink";
   const labelText = tag ? TAG_TEXT_CLASSES[tag.color] : "text-ink-3";

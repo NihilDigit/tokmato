@@ -36,8 +36,6 @@ import { cn } from "@/lib/utils";
 export interface SettleSheetProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** 首次结算 vs 日常 — 仅影响标题副文。 */
-  isFirstTime?: boolean;
   onConfirm: (data: { fGained: number; hGained: number }) => void;
 }
 
@@ -76,7 +74,6 @@ const STEP_TITLES: Record<Step, { title: string; sub?: string }> = {
 export function SettleSheet({
   open,
   onOpenChange,
-  isFirstTime = false,
   onConfirm,
 }: SettleSheetProps) {
   const [step, setStep] = useState<Step>(1);
@@ -142,8 +139,6 @@ export function SettleSheet({
       {STEP_TITLES[step].title}
     </span>
   );
-
-  void isFirstTime;
 
   return (
     <ResponsiveSheet

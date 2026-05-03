@@ -39,15 +39,13 @@ const TAG_FILL_VAR: Record<TagColor, string> = {
 };
 
 export default function JourneyPage() {
-  const { todayPomos, pomodoroHistory, tokenHistory, tags } = useStore(
+  const { pomodoroHistory, tokenHistory, tags } = useStore(
     useShallow((s) => ({
-      todayPomos: s.todayPomos,
       pomodoroHistory: s.pomodoroHistory,
       tokenHistory: s.tokenHistory,
       tags: s.tags,
     })),
   );
-  void todayPomos;
 
   const last30Keys = useMemo(() => {
     const keys: string[] = [];
