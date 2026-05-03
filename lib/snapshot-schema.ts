@@ -193,7 +193,11 @@ export const persistedSnapshotSchema = z
     todayFGained: tokenAmount,
     todayHGained: tokenAmount,
     todayPoolGained: minuteAmount,
-    welcomeGrantedUserIds: z.array(z.string().max(STR_SHORT)).max(ARR_SMALL),
+    // v1.x stored welcomeGrantedUserIds for per-userId welcome idempotency.
+    // v9 moved that idempotency to a per-browser localStorage flag and
+    // stops emitting this key. Kept optional so cloud reads from older
+    // clients still pass the strict gate.
+    welcomeGrantedUserIds: z.array(z.string().max(STR_SHORT)).max(ARR_SMALL).optional(),
     // v1.7 stored guideSeenUserIds; v1.7.1+ moved guide-seen idempotency
     // to a localStorage flag and stops emitting this key. Kept optional
     // so cloud reads from older clients still pass the strict gate.

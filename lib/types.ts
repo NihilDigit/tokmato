@@ -165,7 +165,6 @@ export interface UserState {
   todayFGained: number;
   todayHGained: number;
   todayPoolGained: number;
-  welcomeGrantedUserIds: string[];
 
   // Configurable rules
   tags: TagConfig[];

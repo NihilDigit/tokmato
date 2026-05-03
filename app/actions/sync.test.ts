@@ -36,7 +36,6 @@ function validSnapshot() {
     todayFGained: 0,
     todayHGained: 0,
     todayPoolGained: 0,
-    welcomeGrantedUserIds: [],
     tags: [],
     bonuses: [],
     lastSavedAt: 0,

@@ -7,6 +7,8 @@ import { EntertainmentRunningView } from "@/components/play/EntertainmentRunning
 import { WelcomeGuideSheet } from "@/components/sheets/WelcomeGuideSheet";
 import { selectSnapshot, useStore } from "@/lib/store";
 import { saveToCloud, loadFromCloud } from "@/app/actions/sync";
+import { cancelPushChain } from "@/app/actions/push";
+import { clearActiveSession } from "@/app/actions/active-session";
 
 const AUTOSAVE_DEBOUNCE_MS = 2_000;
 
@@ -27,7 +29,6 @@ function ProviderInner({ children }: { children: React.ReactNode }) {
   const [storeReady, setStoreReady] = useState<boolean>(
     () => useStore.persist?.hasHydrated() ?? false,
   );
-  const welcomeGrantedCount = useStore((s) => s.welcomeGrantedUserIds.length);
   const [welcomeGuideOpen, setWelcomeGuideOpen] = useState(false);
 
   // Manually rehydrate the persisted store after mount (paired with
@@ -55,18 +56,24 @@ function ProviderInner({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
+  // Welcome bonus — per-browser flag (v9+), no auth dependency. Anon
+  // visitors get the +5F/+10H grant once per browser, so the loop closes
+  // before login. Cloud-side dedup is handled at merge time by
+  // `dedupWelcomeEntries` in lib/ledger.ts (collapses anon + cloud
+  // welcomes into a single entry).
   useEffect(() => {
     if (!storeReady) return;
-    if (status !== "authenticated") return;
-    const user = session?.user as { id?: string } | undefined;
-    if (!user?.id) return;
-    useStore.getState().grantWelcomeBonus(user.id);
-  }, [session?.user, status, storeReady, welcomeGrantedCount]);
+    if (typeof window === "undefined") return;
+    try {
+      if (window.localStorage.getItem("tokmato:welcome-granted")) return;
+      window.localStorage.setItem("tokmato:welcome-granted", "1");
+    } catch {
+      return;
+    }
+    useStore.getState().grantWelcomeBonus();
+  }, [storeReady]);
 
-  // First-run guide — gated on a per-browser localStorage flag, NOT auth.
-  // Visitors landing in incognito or pre-login should still see what tokmato
-  // is. The v5→v6 migration pre-flags any device with prior welcome grants
-  // so returning users aren't popped on retroactively.
+  // First-run guide — same per-browser flag pattern, separate key.
   useEffect(() => {
     if (!storeReady) return;
     if (typeof window === "undefined") return;
@@ -77,6 +84,31 @@ function ProviderInner({ children }: { children: React.ReactNode }) {
     }
     setWelcomeGuideOpen(true);
   }, [storeReady]);
+
+  // v8 just-upgraded cleanup — server-side state (QStash push chain,
+  // cross-device active marker) survives a destructive local wipe. If a
+  // user upgraded mid-pomodoro, the chain would keep firing against a
+  // now-empty client. Run once after auth to drain.
+  useEffect(() => {
+    if (!storeReady) return;
+    if (status !== "authenticated") return;
+    if (typeof window === "undefined") return;
+    let marker: string | null = null;
+    try {
+      marker = window.localStorage.getItem("tokmato:v8-just-upgraded");
+    } catch {
+      return;
+    }
+    if (!marker) return;
+    void Promise.allSettled([
+      cancelPushChain().catch(() => undefined),
+      clearActiveSession().catch(() => undefined),
+    ]).then(() => {
+      try {
+        window.localStorage.removeItem("tokmato:v8-just-upgraded");
+      } catch {}
+    });
+  }, [storeReady, status]);
 
   // ─── Auto-sync: app-open LWW load (once per auth session) ──────────────
   // Only overwrite local when the cloud snapshot is strictly newer than

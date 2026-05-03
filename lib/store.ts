@@ -75,7 +75,6 @@ function createStarterState(): UserState {
     todayFGained: 0,
     todayHGained: 0,
     todayPoolGained: 0,
-    welcomeGrantedUserIds: [],
     tags: DEFAULT_TAGS.map((t) => ({ ...t })),
     bonuses: DEFAULT_BONUSES.map((b) => ({ ...b })),
     lastSavedAt: 0,
@@ -161,7 +160,11 @@ interface StoreActions {
   // Settlement
   settle: (data: { fGained: number; hGained: number }) => void;
   ensureToday: () => void;
-  grantWelcomeBonus: (userId: string) => void;
+  /** Grant the +5F/+10H welcome bonus once. v9+ idempotency lives on a
+   *  per-browser localStorage flag in providers.tsx; this action just
+   *  applies the bonus + writes a `kind:"welcome"` ledger entry whenever
+   *  called. The caller is responsible for not calling twice. */
+  grantWelcomeBonus: () => void;
   /** Mark the store as in-sync with a given cloud savedAt. Called from
    *  providers.tsx after a successful save or load. */
   markSynced: (savedAt: number) => void;
@@ -268,12 +271,13 @@ export const useStore = create<Store>()(
       applyCloudSnapshot: (snapshot, savedAt) =>
         set(() => ({ ...DEFAULTS, ...snapshot, lastSavedAt: savedAt })),
 
-      grantWelcomeBonus: (userId) =>
+      grantWelcomeBonus: () =>
         set((s) => {
-          // Per-user idempotency: track every userId that has been granted,
-          // not just the most recent. Otherwise alternating accounts on the
-          // same device farms infinite welcome bonuses.
-          if (!userId || s.welcomeGrantedUserIds.includes(userId)) return s;
+          // v9+: idempotency is delegated to the per-browser localStorage
+          // flag (`tokmato:welcome-granted`) checked by the caller. This
+          // action unconditionally applies the bonus and emits a ledger
+          // entry. Multiple welcomes (e.g. anon-then-cloud collision) are
+          // reconciled by `dedupWelcomeEntries` at merge time.
           const daily = normalizeDay(s);
           const createdAt = Date.now();
           const entry: TokenLedgerEntry = {
@@ -283,11 +287,10 @@ export const useStore = create<Store>()(
             hDelta: WELCOME_HTOKEN,
             createdAt,
             dayKey: todayKey(new Date(createdAt)),
-            note: "new account grant",
+            note: "welcome",
           };
           return {
             ...daily,
-            welcomeGrantedUserIds: [...s.welcomeGrantedUserIds, userId],
             ftoken: round(s.ftoken + WELCOME_FTOKEN),
             htoken: round(s.htoken + WELCOME_HTOKEN),
             todayFGained: round((daily.todayFGained ?? s.todayFGained ?? 0) + WELCOME_FTOKEN),
@@ -697,7 +700,7 @@ export const useStore = create<Store>()(
     },
     {
       name: "tokmato:state",
-      version: 7,
+      version: 8,
       // v1 → v2: replace single-slot welcomeGrantUserId with an array so
       // alternating accounts on the same device can't farm welcome bonuses.
       // v2 → v3: add session.phaseStartedAt for clock-based timer.
@@ -715,7 +718,27 @@ export const useStore = create<Store>()(
       //          and bonuses with the v1.7 defaults so existing users
       //          see the same tag list and the same math 5/7/9/11
       //          ladder behavior (now extrapolated past 11).
+      // v7 → v8: BREAKING wipe. Welcome moves to per-browser localStorage
+      //          flag; ledger writes added for all spending; default
+      //          merge replaces LWW. Per-user welcome dedup
+      //          (`welcomeGrantedUserIds`) retired. Local state wholly
+      //          reset to defaults; cloud snapshot will be merged back
+      //          after auth. localStorage flags (guide-seen / welcome-
+      //          granted) cleared so the user retraces the first-run
+      //          path. A `tokmato:v8-just-upgraded` marker is dropped so
+      //          providers.tsx can run a one-shot server-side cleanup
+      //          (cancelPushChain + clearActiveSession) — without it a
+      //          mid-session upgrade would orphan the QStash chain and
+      //          the cross-device active marker.
       migrate: (persistedState, version) => {
+        if (version < 8 && typeof window !== "undefined") {
+          try {
+            window.localStorage.removeItem("tokmato:guide-seen");
+            window.localStorage.removeItem("tokmato:welcome-granted");
+            window.localStorage.setItem("tokmato:v8-just-upgraded", "1");
+          } catch {}
+          return createStarterState() as Partial<UserState>;
+        }
         if (!persistedState || typeof persistedState !== "object") {
           return persistedState as Partial<UserState>;
         }
@@ -805,7 +828,6 @@ export function selectSnapshot(s: UserState): Partial<UserState> {
     todayFGained: s.todayFGained,
     todayHGained: s.todayHGained,
     todayPoolGained: s.todayPoolGained,
-    welcomeGrantedUserIds: s.welcomeGrantedUserIds,
     tags: s.tags,
     bonuses: s.bonuses,
     lastSavedAt: s.lastSavedAt,

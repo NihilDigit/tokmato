@@ -221,11 +221,32 @@ export default function SettingsPage() {
     if (!confirm("清空本地记录并重置欢迎入账状态? 不能撤销。")) return;
     try {
       localStorage.removeItem("tokmato:state");
+      // v9: welcome bonus is per-browser; clearing local also resets the
+      // flag so the user can re-grant on next visit / login.
+      localStorage.removeItem("tokmato:welcome-granted");
       resetStore();
       alert("已清空本地记录");
     } catch (e) {
       console.error("[settings] clear failed", e);
     }
+  };
+
+  const handleSignOut = async () => {
+    if (
+      !confirm(
+        "退出会清空本地数据（token 余额、历史、看板、wishlist、自定义 tags 与 bonuses）。云端数据保留，下次登录可拉回。确定？",
+      )
+    )
+      return;
+    try {
+      resetStore();
+      localStorage.removeItem("tokmato:state");
+      localStorage.removeItem("tokmato:welcome-granted");
+      // 保留 tokmato:guide-seen — 引导已看，不重弹
+    } catch (e) {
+      console.error("[settings] signOut cleanup failed", e);
+    }
+    await signOut();
   };
 
   return (
@@ -313,7 +334,7 @@ export default function SettingsPage() {
             </div>
             <button
               type="button"
-              onClick={() => signOut()}
+              onClick={handleSignOut}
               className="ml-auto inline-flex min-h-9 items-center gap-2 rounded-full border border-rule px-4 py-1.5 text-[13px] text-ink-2 transition hover:border-plum/40 hover:text-plum"
             >
               <LogOut size={14} />

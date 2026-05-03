@@ -124,57 +124,29 @@ describe("yesterdayKey", () => {
 });
 
 // ===========================================================================
-// grantWelcomeBonus
+// grantWelcomeBonus (v9+: no-arg, per-browser flag in providers.tsx)
 // ===========================================================================
 describe("grantWelcomeBonus", () => {
-  it("grants +5F / +10H and writes a welcome ledger entry on first call", () => {
-    s().grantWelcomeBonus("user-a");
+  it("grants +5F / +10H and writes a welcome ledger entry", () => {
+    s().grantWelcomeBonus();
     const st = s();
     expect(st.ftoken).toBe(5);
     expect(st.htoken).toBe(10);
-    expect(st.welcomeGrantedUserIds).toEqual(["user-a"]);
     expect(st.tokenHistory.length).toBe(1);
     expect(st.tokenHistory[0].kind).toBe("welcome");
     expect(st.tokenHistory[0].fDelta).toBe(5);
     expect(st.tokenHistory[0].hDelta).toBe(10);
+    expect(st.tokenHistory[0].note).toBe("welcome");
   });
 
-  it("is idempotent for the same userId", () => {
-    s().grantWelcomeBonus("user-a");
-    const fAfterFirst = s().ftoken;
-    const hAfterFirst = s().htoken;
-    const histLen = s().tokenHistory.length;
-    s().grantWelcomeBonus("user-a");
-    expect(s().ftoken).toBe(fAfterFirst);
-    expect(s().htoken).toBe(hAfterFirst);
-    expect(s().tokenHistory.length).toBe(histLen);
-    expect(s().welcomeGrantedUserIds).toEqual(["user-a"]);
-  });
-
-  it("grants once per distinct userId — different account on same device gets +5F/+10H once, then is locked", () => {
-    s().grantWelcomeBonus("user-a");
-    s().grantWelcomeBonus("user-b");
-    // Each user grants once; balances reflect two distinct grants.
+  it("is NOT internally idempotent — caller (providers.tsx) gates on localStorage flag", () => {
+    s().grantWelcomeBonus();
+    s().grantWelcomeBonus();
+    // Two welcomes recorded; merge-time `dedupWelcomeEntries` collapses
+    // them. Single-process test confirms the action no longer self-gates.
     expect(s().ftoken).toBe(10);
     expect(s().htoken).toBe(20);
-    expect(s().welcomeGrantedUserIds).toEqual(["user-a", "user-b"]);
     expect(s().tokenHistory.filter((e) => e.kind === "welcome").length).toBe(2);
-
-    // Second pass with the same two users must stay idempotent — no farming.
-    s().grantWelcomeBonus("user-a");
-    s().grantWelcomeBonus("user-b");
-    expect(s().ftoken).toBe(10);
-    expect(s().htoken).toBe(20);
-    expect(s().welcomeGrantedUserIds).toEqual(["user-a", "user-b"]);
-    expect(s().tokenHistory.filter((e) => e.kind === "welcome").length).toBe(2);
-  });
-
-  it("is a no-op for empty-string userId", () => {
-    s().grantWelcomeBonus("");
-    expect(s().ftoken).toBe(0);
-    expect(s().htoken).toBe(0);
-    expect(s().welcomeGrantedUserIds).toEqual([]);
-    expect(s().tokenHistory.length).toBe(0);
   });
 });
 
@@ -823,7 +795,7 @@ describe("auto-sync helpers", () => {
 // ===========================================================================
 describe("reset", () => {
   it("returns balances, sessions, and user collections to starter state", () => {
-    s().grantWelcomeBonus("user-a");
+    s().grantWelcomeBonus();
     s().startSession({ task: "刷题", tag: "cs", type: "input" });
     s().addWish({ name: "耳机", price: 299, pay: "F", why: "降噪" });
     s().addKanbanCard({ col: "inbox", card: { id: "c1", name: "任务" } });
@@ -832,9 +804,9 @@ describe("reset", () => {
     expect(s().ftoken).toBe(0);
     expect(s().htoken).toBe(0);
     expect(s().session).toBeNull();
-    expect(s().welcomeGrantedUserIds).toEqual([]);
     expect(s().wishlist).toEqual([]);
     expect(s().kanban.inbox).toEqual([]);
+    expect(s().tokenHistory).toEqual([]);
     expect(s().foodPresets.map((p) => p.name)).toEqual(["可乐", "雪糕"]);
   });
 });
