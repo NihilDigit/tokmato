@@ -28,11 +28,7 @@ function ProviderInner({ children }: { children: React.ReactNode }) {
     () => useStore.persist?.hasHydrated() ?? false,
   );
   const welcomeGrantedCount = useStore((s) => s.welcomeGrantedUserIds.length);
-  const guideSeenCount = useStore((s) => s.guideSeenUserIds.length);
   const [welcomeGuideOpen, setWelcomeGuideOpen] = useState(false);
-  const [welcomeGuideUserId, setWelcomeGuideUserId] = useState<string | null>(
-    null,
-  );
 
   // Manually rehydrate the persisted store after mount (paired with
   // `skipHydration: true` in lib/store.ts) — keeps SSR HTML consistent
@@ -65,17 +61,22 @@ function ProviderInner({ children }: { children: React.ReactNode }) {
     const user = session?.user as { id?: string } | undefined;
     if (!user?.id) return;
     useStore.getState().grantWelcomeBonus(user.id);
-    // First-run intent statement — show once per user, then mark seen.
-    // The migration v4→v5 pre-populates guideSeenUserIds from
-    // welcomeGrantedUserIds so existing users don't get popped on
-    // retroactively. New users hit grantWelcomeBonus first (idempotent),
-    // then this gate.
-    const seen = useStore.getState().guideSeenUserIds.includes(user.id);
-    if (!seen) {
-      setWelcomeGuideUserId(user.id);
-      setWelcomeGuideOpen(true);
+  }, [session?.user, status, storeReady, welcomeGrantedCount]);
+
+  // First-run guide — gated on a per-browser localStorage flag, NOT auth.
+  // Visitors landing in incognito or pre-login should still see what tokmato
+  // is. The v5→v6 migration pre-flags any device with prior welcome grants
+  // so returning users aren't popped on retroactively.
+  useEffect(() => {
+    if (!storeReady) return;
+    if (typeof window === "undefined") return;
+    try {
+      if (window.localStorage.getItem("tokmato:guide-seen")) return;
+    } catch {
+      return;
     }
-  }, [session?.user, status, storeReady, welcomeGrantedCount, guideSeenCount]);
+    setWelcomeGuideOpen(true);
+  }, [storeReady]);
 
   // ─── Auto-sync: app-open LWW load (once per auth session) ──────────────
   // Only overwrite local when the cloud snapshot is strictly newer than
@@ -166,9 +167,9 @@ function ProviderInner({ children }: { children: React.ReactNode }) {
         open={welcomeGuideOpen}
         onOpenChange={setWelcomeGuideOpen}
         onConfirm={() => {
-          if (welcomeGuideUserId) {
-            useStore.getState().markGuideSeen(welcomeGuideUserId);
-          }
+          try {
+            window.localStorage.setItem("tokmato:guide-seen", "1");
+          } catch {}
         }}
       />
     </ThemeProvider>

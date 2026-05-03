@@ -141,7 +141,10 @@ export const persistedSnapshotSchema = z
     todayHGained: tokenAmount,
     todayPoolGained: minuteAmount,
     welcomeGrantedUserIds: z.array(z.string().max(STR_SHORT)).max(ARR_SMALL),
-    guideSeenUserIds: z.array(z.string().max(STR_SHORT)).max(ARR_SMALL),
+    // v1.7 stored guideSeenUserIds; v1.7.1+ moved guide-seen idempotency
+    // to a localStorage flag and stops emitting this key. Kept optional
+    // so cloud reads from older clients still pass the strict gate.
+    guideSeenUserIds: z.array(z.string().max(STR_SHORT)).max(ARR_SMALL).optional(),
     lastSavedAt: epochMs,
     pomodoroHistory: z.array(pomodoroRecord).max(ARR_MED),
     tokenHistory: z.array(tokenLedgerEntry).max(ARR_LARGE),

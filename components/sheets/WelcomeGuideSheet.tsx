@@ -1,29 +1,14 @@
 "use client";
 
-/**
- * WelcomeGuideSheet — first-run intent statement.
- *
- * Two-column "系统管 / 系统不管" layout that defines tokmato's scope:
- * the token economy is built to throttle high-stimulation, easily
- * over-consumed leisure (delivery food, doomscrolling, gaming, shows);
- * low-stimulation normal life (reading, exercise, offline socializing)
- * stays outside the system on purpose — taxing it would convert healthy
- * defaults into chores.
- *
- * Triggered once per user from `providers.tsx` after first auth, and
- * re-openable from Settings → 入门指南. Idempotency lives in
- * `guideSeenUserIds` on the persisted state.
- */
-
 import { ResponsiveSheet } from "@/components/ui/responsive-sheet";
 import { cn } from "@/lib/utils";
 
 export interface WelcomeGuideSheetProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** Called when the user clicks the confirm button. The consumer is
-   *  responsible for `markGuideSeen(userId)` if this is a first-run
-   *  view; the Settings re-open path passes a no-op. */
+  /** Called when the user dismisses via the confirm button. Used by the
+   *  first-run path to set the `tokmato:guide-seen` localStorage flag;
+   *  the Settings re-open path passes nothing. */
   onConfirm?: () => void;
 }
 
@@ -49,14 +34,9 @@ export function WelcomeGuideSheet({
       open={open}
       onOpenChange={onOpenChange}
       title={titleNode}
-      description="先看这一页 · 之后从设置可再次打开"
       desktopWidthClass="sm:max-w-[600px]"
     >
       <div className="flex flex-col gap-6">
-        <p className="text-[14px] leading-relaxed text-ink-2">
-          把娱乐换算成今日产出 · 用来约束容易上头的消遣，而不是给所有行为打分。
-        </p>
-
         <div className="grid grid-cols-2 gap-3">
           <Column
             kicker="系统管"
@@ -67,14 +47,10 @@ export function WelcomeGuideSheet({
           <Column
             kicker="系统不管"
             tone="ink"
-            note="不必计入"
+            note="不计入"
             items={UNMANAGED}
           />
         </div>
-
-        <p className="text-[13px] leading-relaxed text-ink-3 border-t border-rule pt-4">
-          低刺激的正常生活不需要代币管制 · 让它们留在系统外，避免把好习惯变成"任务"。
-        </p>
 
         <div className="flex items-center justify-end gap-2 border-t border-rule pt-5">
           <button
@@ -86,7 +62,7 @@ export function WelcomeGuideSheet({
               "hover:bg-ink-2 transition-colors",
             )}
           >
-            我懂了
+            知道了
           </button>
         </div>
       </div>

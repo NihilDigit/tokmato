@@ -28,7 +28,6 @@ function validSnapshot() {
     todayHGained: 0,
     todayPoolGained: 0,
     welcomeGrantedUserIds: [],
-    guideSeenUserIds: [],
     lastSavedAt: 0,
     pomodoroHistory: [],
     tokenHistory: [],
@@ -78,6 +77,14 @@ describe("persistedSnapshotSchema — happy path", () => {
       mode: "running",
       notes: [],
     } as never;
+    expect(persistedSnapshotSchema.safeParse(snap).success).toBe(true);
+  });
+});
+
+describe("persistedSnapshotSchema — v1.7 backward compat", () => {
+  it("accepts a snapshot from a v1.7 client that still emits guideSeenUserIds", () => {
+    const snap = validSnapshot() as Record<string, unknown>;
+    snap.guideSeenUserIds = ["user-a"];
     expect(persistedSnapshotSchema.safeParse(snap).success).toBe(true);
   });
 });

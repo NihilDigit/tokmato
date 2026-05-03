@@ -124,33 +124,6 @@ describe("yesterdayKey", () => {
 });
 
 // ===========================================================================
-// markGuideSeen
-// ===========================================================================
-describe("markGuideSeen", () => {
-  it("appends the userId on first call", () => {
-    s().markGuideSeen("user-a");
-    expect(s().guideSeenUserIds).toEqual(["user-a"]);
-  });
-
-  it("is idempotent for the same userId", () => {
-    s().markGuideSeen("user-a");
-    s().markGuideSeen("user-a");
-    expect(s().guideSeenUserIds).toEqual(["user-a"]);
-  });
-
-  it("tracks distinct userIds independently", () => {
-    s().markGuideSeen("user-a");
-    s().markGuideSeen("user-b");
-    expect(s().guideSeenUserIds).toEqual(["user-a", "user-b"]);
-  });
-
-  it("is a no-op for empty-string userId", () => {
-    s().markGuideSeen("");
-    expect(s().guideSeenUserIds).toEqual([]);
-  });
-});
-
-// ===========================================================================
 // grantWelcomeBonus
 // ===========================================================================
 describe("grantWelcomeBonus", () => {
