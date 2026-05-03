@@ -16,12 +16,18 @@ import {
   Bell,
   BellOff,
   BookOpen,
+  Plus,
+  Pencil,
 } from "lucide-react";
 import { useSession, signIn, signOut } from "next-auth/react";
 import { useTheme } from "@/components/theme-provider";
 import { selectSnapshot, useStore } from "@/lib/store";
 import { saveToCloud, loadFromCloud } from "@/app/actions/sync";
 import { WelcomeGuideSheet } from "@/components/sheets/WelcomeGuideSheet";
+import { EditTagSheet } from "@/components/sheets/EditTagSheet";
+import { EditBonusSheet } from "@/components/sheets/EditBonusSheet";
+import { TAG_CHIP_CLASSES } from "@/lib/tag-colors";
+import type { BonusConfig, TagConfig } from "@/lib/types";
 import {
   isPushSupported,
   getPermission,
@@ -67,6 +73,21 @@ export default function SettingsPage() {
   const [syncStatus, setSyncStatus] = useState<SyncStatus>("idle");
   const [syncMsg, setSyncMsg] = useState<string>("");
   const [guideOpen, setGuideOpen] = useState(false);
+
+  // Tag / Bonus management
+  const tags = useStore((s) => s.tags);
+  const bonuses = useStore((s) => s.bonuses);
+  const addTag = useStore((s) => s.addTag);
+  const updateTag = useStore((s) => s.updateTag);
+  const removeTag = useStore((s) => s.removeTag);
+  const addBonus = useStore((s) => s.addBonus);
+  const updateBonus = useStore((s) => s.updateBonus);
+  const removeBonus = useStore((s) => s.removeBonus);
+
+  const [tagSheetOpen, setTagSheetOpen] = useState(false);
+  const [tagEditing, setTagEditing] = useState<TagConfig | null>(null);
+  const [bonusSheetOpen, setBonusSheetOpen] = useState(false);
+  const [bonusEditing, setBonusEditing] = useState<BonusConfig | null>(null);
 
   // Push subscription state — initialized from the live SW registration.
   const [pushSupported, setPushSupported] = useState(false);
@@ -367,6 +388,128 @@ export default function SettingsPage() {
 
       <Hairline />
 
+      {/* ───────────── Tags ───────────── */}
+      <Section title="Tags">
+        <div className="flex flex-col gap-3">
+          {tags.length === 0 ? (
+            <p className="text-sm text-ink-3">还没有 Tag。</p>
+          ) : (
+            <ul className="flex flex-col gap-1.5">
+              {tags.map((t) => (
+                <li
+                  key={t.id}
+                  className="flex items-center gap-3 rounded-lg border border-rule px-3 py-2.5"
+                >
+                  <span
+                    className={cn(
+                      "inline-flex items-center rounded-full px-2.5 py-1 font-mono text-[12px] leading-none",
+                      TAG_CHIP_CLASSES[t.color],
+                    )}
+                  >
+                    {t.label}
+                  </span>
+                  <span className="text-[12px] text-ink-mute">{t.id}</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTagEditing(t);
+                      setTagSheetOpen(true);
+                    }}
+                    aria-label="编辑"
+                    className="ml-auto inline-flex h-8 w-8 items-center justify-center rounded-full text-ink-3 transition hover:bg-paper-2 hover:text-ink"
+                  >
+                    <Pencil size={14} />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <button
+            type="button"
+            onClick={() => {
+              setTagEditing(null);
+              setTagSheetOpen(true);
+            }}
+            className="inline-flex w-fit min-h-9 items-center gap-1.5 rounded-full border border-dashed border-rule px-4 py-1.5 text-[13px] text-ink-2 transition hover:border-ink/30 hover:text-ink"
+          >
+            <Plus size={14} />
+            新建 Tag
+          </button>
+        </div>
+      </Section>
+
+      <Hairline />
+
+      {/* ───────────── 代币规则 (bonuses) ───────────── */}
+      <Section title="代币规则">
+        <div className="flex flex-col gap-3">
+          {bonuses.length === 0 ? (
+            <p className="text-sm text-ink-3">还没有 bonus 规则。</p>
+          ) : (
+            <ul className="flex flex-col gap-1.5">
+              {bonuses.map((b) => {
+                const tag = tags.find((t) => t.id === b.tagId);
+                return (
+                  <li
+                    key={b.id}
+                    className="flex items-center gap-3 rounded-lg border border-rule px-3 py-2.5"
+                  >
+                    {tag ? (
+                      <span
+                        className={cn(
+                          "inline-flex items-center rounded-full px-2.5 py-1 font-mono text-[12px] leading-none",
+                          TAG_CHIP_CLASSES[tag.color],
+                        )}
+                      >
+                        {tag.label}
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center rounded-full border border-dashed border-rule px-2.5 py-1 font-mono text-[12px] leading-none text-ink-mute">
+                        {b.tagId}
+                      </span>
+                    )}
+                    <span className="mono text-[12px] text-ink-2">
+                      起步 {b.threshold} 给 {b.initialReward} F · 之后每 +
+                      {b.step} 给 {b.stepReward} F
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setBonusEditing(b);
+                        setBonusSheetOpen(true);
+                      }}
+                      aria-label="编辑"
+                      className="ml-auto inline-flex h-8 w-8 items-center justify-center rounded-full text-ink-3 transition hover:bg-paper-2 hover:text-ink"
+                    >
+                      <Pencil size={14} />
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          <button
+            type="button"
+            disabled={tags.length === 0}
+            onClick={() => {
+              setBonusEditing(null);
+              setBonusSheetOpen(true);
+            }}
+            className="inline-flex w-fit min-h-9 items-center gap-1.5 rounded-full border border-dashed border-rule px-4 py-1.5 text-[13px] text-ink-2 transition hover:border-ink/30 hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <Plus size={14} />
+            新建 Bonus
+          </button>
+          {tags.length > 0 && bonuses.length === 0 && (
+            <p className="text-[11px] text-ink-mute">
+              没有 bonus 规则时，番茄按基础单价计 F（输入 1 / 输出 0.5）。
+            </p>
+          )}
+        </div>
+      </Section>
+
+      <Hairline />
+
       {/* ───────────── Data ───────────── */}
       <Section title="数据">
         <div className="flex flex-col gap-3">
@@ -422,6 +565,61 @@ export default function SettingsPage() {
       </Section>
 
       <WelcomeGuideSheet open={guideOpen} onOpenChange={setGuideOpen} />
+
+      <EditTagSheet
+        open={tagSheetOpen}
+        onOpenChange={(o) => {
+          setTagSheetOpen(o);
+          if (!o) setTagEditing(null);
+        }}
+        initial={
+          tagEditing ? { label: tagEditing.label, color: tagEditing.color } : undefined
+        }
+        onConfirm={(data) => {
+          if (tagEditing) {
+            updateTag(tagEditing.id, data);
+          } else {
+            addTag(data);
+          }
+        }}
+        onDelete={
+          tagEditing
+            ? () => {
+                if (confirm(`删除 Tag "${tagEditing.label}"？关联的 bonus 也会一起删掉。历史记录不动。`)) {
+                  removeTag(tagEditing.id);
+                }
+              }
+            : undefined
+        }
+      />
+
+      <EditBonusSheet
+        open={bonusSheetOpen}
+        onOpenChange={(o) => {
+          setBonusSheetOpen(o);
+          if (!o) setBonusEditing(null);
+        }}
+        tags={tags}
+        initial={
+          bonusEditing
+            ? {
+                tagId: bonusEditing.tagId,
+                threshold: bonusEditing.threshold,
+                initialReward: bonusEditing.initialReward,
+                step: bonusEditing.step,
+                stepReward: bonusEditing.stepReward,
+              }
+            : undefined
+        }
+        onConfirm={(data) => {
+          if (bonusEditing) {
+            updateBonus(bonusEditing.id, data);
+          } else {
+            addBonus(data);
+          }
+        }}
+        onDelete={bonusEditing ? () => removeBonus(bonusEditing.id) : undefined}
+      />
     </main>
   );
 }
