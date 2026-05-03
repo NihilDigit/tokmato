@@ -38,7 +38,7 @@ globalThis.localStorage = new MemoryStorage();
 // Imports (after stub).
 // ---------------------------------------------------------------------------
 import { describe, it, expect, beforeEach } from "bun:test";
-import { useStore, todayKey } from "./store";
+import { useStore, todayKey, yesterdayKey } from "./store";
 import type { KanbanCard, WishlistItem } from "./types";
 
 // The store uses `persist({ skipHydration: true })`. Without rehydration
@@ -101,6 +101,52 @@ describe("todayKey", () => {
 
   it("rolls month boundary correctly when before 4am", () => {
     expect(todayKey(beijing(2026, 5, 1, 2, 0))).toBe("2026-04-30");
+  });
+});
+
+// ===========================================================================
+// yesterdayKey
+// ===========================================================================
+describe("yesterdayKey", () => {
+  it("returns the prior tokmato day for a normal Beijing morning", () => {
+    expect(yesterdayKey(beijing(2026, 5, 3, 9, 0))).toBe("2026-05-02");
+  });
+
+  it("treats a Beijing late-night before 4am as still 'yesterday' = 2 days back", () => {
+    // 03:30 today is still tokmato-yesterday by todayKey; yesterdayKey
+    // is the tokmato-day 24h before that.
+    expect(yesterdayKey(beijing(2026, 5, 3, 3, 30))).toBe("2026-05-01");
+  });
+
+  it("rolls month boundary", () => {
+    expect(yesterdayKey(beijing(2026, 5, 1, 9, 0))).toBe("2026-04-30");
+  });
+});
+
+// ===========================================================================
+// markGuideSeen
+// ===========================================================================
+describe("markGuideSeen", () => {
+  it("appends the userId on first call", () => {
+    s().markGuideSeen("user-a");
+    expect(s().guideSeenUserIds).toEqual(["user-a"]);
+  });
+
+  it("is idempotent for the same userId", () => {
+    s().markGuideSeen("user-a");
+    s().markGuideSeen("user-a");
+    expect(s().guideSeenUserIds).toEqual(["user-a"]);
+  });
+
+  it("tracks distinct userIds independently", () => {
+    s().markGuideSeen("user-a");
+    s().markGuideSeen("user-b");
+    expect(s().guideSeenUserIds).toEqual(["user-a", "user-b"]);
+  });
+
+  it("is a no-op for empty-string userId", () => {
+    s().markGuideSeen("");
+    expect(s().guideSeenUserIds).toEqual([]);
   });
 });
 

@@ -141,6 +141,7 @@ export const persistedSnapshotSchema = z
     todayHGained: tokenAmount,
     todayPoolGained: minuteAmount,
     welcomeGrantedUserIds: z.array(z.string().max(STR_SHORT)).max(ARR_SMALL),
+    guideSeenUserIds: z.array(z.string().max(STR_SHORT)).max(ARR_SMALL),
     lastSavedAt: epochMs,
     pomodoroHistory: z.array(pomodoroRecord).max(ARR_MED),
     tokenHistory: z.array(tokenLedgerEntry).max(ARR_LARGE),

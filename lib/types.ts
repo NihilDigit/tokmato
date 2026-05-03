@@ -109,6 +109,13 @@ export interface UserState {
   todayHGained: number;
   todayPoolGained: number;
   welcomeGrantedUserIds: string[];
+  /**
+   * Per-user idempotency for the first-run welcome guide popup. Same
+   * shape as `welcomeGrantedUserIds`. A user appears here once they've
+   * dismissed the guide; the Settings re-open entry doesn't add to this
+   * (it's a manual re-view, not a first-run dismiss).
+   */
+  guideSeenUserIds: string[];
 
   /**
    * Local clock value of the most recent successful saveToCloud (or the
