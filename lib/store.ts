@@ -130,6 +130,16 @@ export function yesterdayKey(now: Date = new Date()): string {
 const round = (n: number, p = 1) => Math.round(n * 10 ** p) / 10 ** p;
 const clamp = (v: number, lo = 0, hi = Infinity) => Math.max(lo, Math.min(hi, v));
 
+/** Latest non-null YYYY-MM-DD across the inputs. ISO date strings sort
+ *  chronologically as plain strings, so a max via sort is enough.
+ *  Used by the cloud-merge to pick a "latest known progress" value
+ *  rather than letting either side wipe the other's freshness. */
+function maxDate(...dates: (string | null | undefined)[]): string | null {
+  const present = dates.filter((d): d is string => Boolean(d));
+  if (present.length === 0) return null;
+  return present.sort()[present.length - 1];
+}
+
 function normalizeDay(s: Store): Partial<UserState> {
   const nextDay = todayKey();
   const activeDay = s.activeDay;
@@ -403,7 +413,12 @@ export const useStore = create<Store>()(
               ? (local.playSession ?? cloud.playSession ?? null)
               : null,
             activeDay: today,
-            lastSettledDate: cloud.lastSettledDate ?? local.lastSettledDate,
+            // Take the latest known settled date across local + cloud
+            // so a fresh same-day local advance isn't reverted by a
+            // stale cloud snapshot (which would re-enable the settle
+            // affordance and let the user double-settle, doubling the
+            // ledger entry). YYYY-MM-DD strings sort chronologically.
+            lastSettledDate: maxDate(local.lastSettledDate, cloud.lastSettledDate),
             todayPomos: dayPomos,
             todayCountsByTag: dayCountsByTag,
             todayFGained: round(dayF),

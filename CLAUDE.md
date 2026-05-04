@@ -46,9 +46,9 @@ Manual, semantic. Auto-generated commit lists are flow-of-thought; semantic note
   - **修复** — bug fixes, naming the affected path and who would hit it.
   - **工程** — internal-only changes (test reorgs, CI tweaks, dep bumps).
 - **Style**: same Chinese tech writing discipline as README; the AI-tells blacklist in the global `~/.claude/CLAUDE.md` "文档撰写风格" section applies. Don't write "What's Changed" or commit lists.
-- **Command**:
+- **Command** (`--cleanup=verbatim` is **required** — without it git strips every line starting with `#` as a comment, eating the `## 主要变化` / `## 修复` / `## 工程` headings):
   ```bash
-  git tag -a v2.X -m "$(cat <<'EOF'
+  git tag -a v2.X --cleanup=verbatim -m "$(cat <<'EOF'
   v2.X — one-line subject
 
   ## 主要变化

@@ -130,6 +130,34 @@ describeIf("sync server actions (real Redis)", async () => {
     expect(loaded).toBeNull();
   });
 
+  it("round-trip preserves session + notes + lastSettledDate end-to-end", async () => {
+    // The "local-vs-cloud" data-loss bugs all manifested when a fresh
+    // local advance roundtripped through the schema and got eaten on
+    // the way out. Pin the surface: save a snapshot containing a live
+    // session with notes + a recent settle date; read it back; assert
+    // every field survives the schema parse and the JSON storage layer.
+    const snap = validSnapshot();
+    snap.session = {
+      task: "Kira 第三章",
+      tag: "math",
+      type: "input",
+      mode: "running",
+      startedAt: Date.now() - 60_000,
+      phaseStartedAt: Date.now() - 60_000,
+      count: 1,
+      notes: ["想到一个反例", "回头查公式"],
+    };
+    snap.lastSettledDate = "2026-05-04";
+
+    await saveToCloud(snap);
+    const loaded = await loadFromCloud();
+    expect(loaded).not.toBeNull();
+    const out = loaded!.snapshot as typeof snap;
+    expect(out.session).toEqual(snap.session);
+    expect(out.session?.notes).toEqual(["想到一个反例", "回头查公式"]);
+    expect(out.lastSettledDate).toBe("2026-05-04");
+  });
+
   it("RATE_LIMITED kicks in after the per-window cap; the offending write is rejected", async () => {
     // Pre-seed the rate-limit bucket past the 30-cap so the next save trips it.
     const bucket = Math.floor(Date.now() / 1000 / 60);

@@ -77,6 +77,7 @@ export interface RunningViewProps {
 
 export function RunningView({ session, onEnd }: RunningViewProps) {
   const advancePhase = useStore((s) => s.advancePomodoroPhase);
+  const addNoteToSession = useStore((s) => s.addNoteToSession);
 
   const { mode, count, phaseStartedAt } = session;
   const phaseDuration = mode === "running" ? POMO_MS : BUFFER_MS;
@@ -84,8 +85,10 @@ export function RunningView({ session, onEnd }: RunningViewProps) {
   // Wall-clock tick — single source of truth for displayed time.
   const [now, setNow] = useState(() => Date.now());
 
-  // Notes typed during this string of pomodoros
-  const [notes, setNotes] = useState<string[]>(session.notes ?? []);
+  // Notes typed during this string of pomodoros — read straight from
+  // the persisted session so a refresh / remount keeps them. Local
+  // React state used to hold these and was lost across reloads.
+  const notes = session.notes ?? [];
   const [noteDraft, setNoteDraft] = useState("");
 
   // Long-press end progress (0..1)
@@ -194,7 +197,7 @@ export function RunningView({ session, onEnd }: RunningViewProps) {
   const submitNote = () => {
     const t = noteDraft.trim();
     if (!t) return;
-    setNotes((n) => [...n, t]);
+    addNoteToSession(t);
     setNoteDraft("");
   };
 

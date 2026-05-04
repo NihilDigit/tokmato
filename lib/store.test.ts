@@ -1151,6 +1151,70 @@ describe("applyMergedSnapshot", () => {
     expect(s().session).toEqual(cloudSession);
   });
 
+  it("lastSettledDate keeps the latest known across local and cloud", () => {
+    // Regression: cloud-takes-precedence used to revert a fresh local
+    // settle when autosave hadn't pushed yet. UI would re-enable the
+    // settle affordance and the user could double-settle.
+    useStore.setState({ lastSettledDate: "2026-05-04" });
+    s().applyMergedSnapshot(
+      {
+        ftoken: 0,
+        htoken: 0,
+        tokenHistory: [],
+        lastSettledDate: "2026-05-03",
+      },
+      NOW,
+    );
+    expect(s().lastSettledDate).toBe("2026-05-04");
+
+    // Symmetric: cloud fresher (e.g. user settled on another device
+    // since this one's last sync) — adopt cloud's date.
+    useStore.setState({ lastSettledDate: "2026-05-03" });
+    s().applyMergedSnapshot(
+      {
+        ftoken: 0,
+        htoken: 0,
+        tokenHistory: [],
+        lastSettledDate: "2026-05-04",
+      },
+      NOW,
+    );
+    expect(s().lastSettledDate).toBe("2026-05-04");
+
+    // Both null: stays null.
+    useStore.setState({ lastSettledDate: null });
+    s().applyMergedSnapshot(
+      { ftoken: 0, htoken: 0, tokenHistory: [], lastSettledDate: null },
+      NOW,
+    );
+    expect(s().lastSettledDate).toBeNull();
+  });
+
+  it("addNoteToSession persists notes through reload (the partialize / persist path)", () => {
+    // Regression: RunningView used to keep notes in component-local
+    // React state, so the user's typed thoughts vanished on refresh.
+    // The fix routes them through the store action; persist + cloud
+    // sync both pick them up via session.notes.
+    const session = {
+      task: "deep work",
+      tag: "study",
+      type: "input" as const,
+      mode: "running" as const,
+      startedAt: NOW,
+      phaseStartedAt: NOW,
+      count: 1,
+      notes: [],
+    };
+    useStore.setState({ session });
+    s().addNoteToSession("first thought");
+    s().addNoteToSession("second thought");
+    expect(s().session?.notes).toEqual(["first thought", "second thought"]);
+    // selectSnapshot covers session, so notes ride through the cloud
+    // round-trip too. Verify the projection includes them.
+    const snap = require("@/lib/store").selectSnapshot(useStore.getState());
+    expect(snap.session?.notes).toEqual(["first thought", "second thought"]);
+  });
+
   it("is idempotent — re-running with the same cloud snapshot doesn't grow ledger", () => {
     const cloud = {
       ftoken: 5,
