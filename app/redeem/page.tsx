@@ -9,6 +9,7 @@ import { FoodSheet } from "@/components/sheets/FoodSheet";
 import { WishRedeemSheet } from "@/components/sheets/WishRedeemSheet";
 import { AddWishSheet } from "@/components/sheets/AddWishSheet";
 import { useStore } from "@/lib/store";
+import { startPushChain } from "@/app/actions/push";
 
 type Pay = "F" | "H" | "mixed";
 type Wish = { id: string; name: string; price: number; pay: Pay; why: string; progress: number };
@@ -187,6 +188,18 @@ export default function RedeemPage() {
         onConfirm={(d) => {
           startPlay(d);
           setOpenPlay(false);
+          // Schedule a single play-end notification on the server so the
+          // user gets pulled back when their slice runs out, even with the
+          // tab closed. Mirrors the pomodoro pattern; no chain afterwards.
+          const fresh = useStore.getState().playSession;
+          if (fresh) {
+            void startPushChain({
+              sessionId: String(fresh.startedAt),
+              boundaryAt: fresh.startedAt + fresh.totalMinutes * 60_000,
+              kind: "play-end",
+              count: 1,
+            }).catch(() => {});
+          }
         }}
       />
       <FoodSheet

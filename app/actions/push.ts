@@ -28,6 +28,7 @@ import {
   publishWithDelay,
   cancelMessage,
 } from "@/lib/qstash";
+import { pushCallbackUrl } from "@/lib/push-callback-url";
 import { z } from "zod";
 
 const pushSubscriptionSchema = z.object({
@@ -43,7 +44,10 @@ const startChainSchema = z.object({
   sessionId: z.string().min(1).max(100),
   /** Wall-clock ms when the next notification should fire. */
   boundaryAt: z.number().int().positive(),
-  kind: z.enum(["running-end", "buffer-end"]),
+  /** "running-end" / "buffer-end" chain across phases for pomodoro;
+   *  "play-end" is single-fire — the route handler does not chain
+   *  another link after delivering it. */
+  kind: z.enum(["running-end", "buffer-end", "play-end"]),
   count: z.number().int().min(1).max(1000),
 });
 
@@ -67,15 +71,6 @@ async function getUserId(): Promise<string> {
   return id;
 }
 
-function callbackUrl(): string {
-  // QStash needs a public URL it can POST to. Trust VERCEL_URL in
-  // preview/prod; allow override for local tunneling (e.g., ngrok).
-  const explicit = process.env.QSTASH_CALLBACK_URL;
-  if (explicit) return `${explicit.replace(/\/$/, "")}/api/push/fire`;
-  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}/api/push/fire`;
-  if (process.env.AUTH_URL) return `${process.env.AUTH_URL.replace(/\/$/, "")}/api/push/fire`;
-  return "https://tokmato.nihildigit.dev/api/push/fire";
-}
 
 export async function savePushSubscription(
   raw: unknown
@@ -134,7 +129,7 @@ export async function startPushChain(
 
   const delaySeconds = Math.max(1, Math.round((parsed.data.boundaryAt - Date.now()) / 1000));
   const { messageId } = await publishWithDelay({
-    callbackUrl: callbackUrl(),
+    callbackUrl: pushCallbackUrl(),
     body: {
       userId,
       sessionId: parsed.data.sessionId,

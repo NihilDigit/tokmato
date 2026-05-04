@@ -211,7 +211,14 @@ function ProviderInner({ children }: { children: React.ReactNode }) {
       {playSession && (
         <EntertainmentRunningView
           session={playSession}
-          onEnd={({ refundMinutes }) => endPlay({ refundMinutes })}
+          onEnd={({ refundMinutes }) => {
+            endPlay({ refundMinutes });
+            // Cancel the play-end QStash callback if there is one — natural
+            // expiry races with the QStash fire by ~ms, so this may no-op
+            // (server already deleted pending after delivering). Either
+            // way we stop a stale chain from firing if user ends early.
+            void cancelPushChain().catch(() => {});
+          }}
         />
       )}
       <WelcomeGuideSheet

@@ -22,6 +22,7 @@ import {
   publishWithDelay,
   verifyQStashSignature,
 } from "@/lib/qstash";
+import { pushCallbackUrl } from "@/lib/push-callback-url";
 
 const POMO_MS = 25 * 60 * 1000;
 const BUFFER_MS = 60 * 1000;
@@ -29,17 +30,9 @@ const BUFFER_MS = 60 * 1000;
 const callbackBodySchema = z.object({
   userId: z.string().min(1).max(100),
   sessionId: z.string().min(1).max(100),
-  kind: z.enum(["running-end", "buffer-end"]),
+  kind: z.enum(["running-end", "buffer-end", "play-end"]),
   count: z.number().int().min(1).max(1000),
 });
-
-function callbackUrl(): string {
-  const explicit = process.env.QSTASH_CALLBACK_URL;
-  if (explicit) return `${explicit.replace(/\/$/, "")}/api/push/fire`;
-  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}/api/push/fire`;
-  if (process.env.AUTH_URL) return `${process.env.AUTH_URL.replace(/\/$/, "")}/api/push/fire`;
-  return "https://tokmato.nihildigit.dev/api/push/fire";
-}
 
 export async function POST(request: Request) {
   const rawBody = await request.text();
@@ -47,7 +40,7 @@ export async function POST(request: Request) {
 
   // Verify signature against QStash's signing keys. Without this any
   // public actor could trigger arbitrary push deliveries.
-  const verified = await verifyQStashSignature(signature, rawBody, callbackUrl());
+  const verified = await verifyQStashSignature(signature, rawBody, pushCallbackUrl());
   if (!verified) {
     return new NextResponse("invalid signature", { status: 401 });
   }
@@ -90,10 +83,16 @@ export async function POST(request: Request) {
           body: `第 ${count} 个番茄结束，进入 1 分钟缓冲`,
           tag: "tokmato-pomodoro",
         }
-      : {
+      : kind === "buffer-end"
+      ? {
           title: "缓冲结束",
           body: `第 ${count + 1} 个番茄开始`,
           tag: "tokmato-pomodoro",
+        }
+      : {
+          title: "娱乐时间到了",
+          body: "时间池里的份额已经用完",
+          tag: "tokmato-play",
         };
   const result = await sendWebPush(subscription, payload);
 
@@ -109,6 +108,14 @@ export async function POST(request: Request) {
   // delivery failure shouldn't break the chain forever.
   if (!result.ok && process.env.NODE_ENV !== "production") {
     console.warn("[push/fire] delivery failed", result);
+  }
+
+  // play-end is single-fire — wipe pending and exit. No active marker
+  // to advance (play does not use the cross-device marker), and no
+  // next link to schedule.
+  if (kind === "play-end") {
+    await redis.del(kvKey.pushPending(userId));
+    return NextResponse.json({ ok: true, kind: "play-end" });
   }
 
   // Advance the cross-device active marker so a closed-tab originator
@@ -130,7 +137,7 @@ export async function POST(request: Request) {
 
   try {
     const { messageId } = await publishWithDelay({
-      callbackUrl: callbackUrl(),
+      callbackUrl: pushCallbackUrl(),
       body: { userId, sessionId, kind: next.kind, count: next.count },
       delaySeconds: next.delaySeconds,
     });
