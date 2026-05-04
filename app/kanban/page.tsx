@@ -160,12 +160,10 @@ export default function KanbanPage() {
   };
 
   const onCardDragEnd = (commit: boolean) => {
-    setDrag((prev) => {
-      if (prev && commit && prev.hoverCol && prev.hoverCol !== prev.fromCol) {
-        moveCard({ cardId: prev.card.id, toCol: prev.hoverCol });
-      }
-      return null;
-    });
+    if (commit && drag && drag.hoverCol && drag.hoverCol !== drag.fromCol) {
+      moveCard({ cardId: drag.card.id, toCol: drag.hoverCol });
+    }
+    setDrag(null);
   };
 
   const handleMobileMove = (toCol: ColId) => {
