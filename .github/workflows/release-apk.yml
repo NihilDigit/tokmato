@@ -45,6 +45,14 @@ jobs:
           distribution: temurin
           java-version: "21"
 
+      - name: Setup Node 22
+        # Capacitor 8 CLI invokes its own Node binary (not Bun) and
+        # bails with "requires NodeJS >=22.0.0" when the runner has
+        # an older one. setup-node pins the bunx-resolved node.
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
 
