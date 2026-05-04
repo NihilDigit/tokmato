@@ -33,19 +33,29 @@ https://tokmato.nihildigit.dev
 
 ## 同步模型
 
-云端持久化采用 Upstash Redis 单 key 存放完整状态快照，写入受 zod 校验、256 KB 字节上限与每分钟 30 次的速率限制三层保护。设备端在登录后启用自动同步：Token 余额或集合长度变化时触发 2 秒防抖的 saveToCloud；应用打开时执行一次 loadFromCloud，按 savedAt 时间戳判断云端是否较新，是则全量覆盖本地。
+云端持久化采用 Upstash Redis 单 key 存放完整状态快照，写入受 zod 校验、1 MB 字节上限与每分钟 30 次的速率限制三层保护。设备端在登录后启用自动同步：Token 余额或集合长度变化时触发 2 秒防抖的写入；应用打开时拉取一次云端快照，按 id 去重合并到本地。账本、看板、愿望清单、tag / bonus 配置都按 id dedup；余额从合并后的账本重新算出来；正在跑的番茄 / 娱乐 session 以本地为准——避免刚启动还没 autosave 上去就被云端旧 snapshot 抹掉。
 
-未采用事件溯源（event sourcing）的取舍有两层。其一，应用面向单用户单账号，"两端同时修改同一字段" 的真实概率极低，事件去重与排序的工程复杂度不与之匹配。其二，事件词汇会随每个新增字段线性扩张，对应客户端 reducer 与服务端 apply 逻辑也成倍增长；快照模型把这些归并为单次 partialize + zod 的开销，在单用户场景下显著降低维护成本。
+未采用事件溯源（event sourcing）的取舍有两层。其一，应用面向单用户单账号，"两端同时修改同一字段" 的真实概率极低，事件去重与排序的工程复杂度不与之匹配。其二，事件词汇会随每个新增字段线性扩张，对应客户端 reducer 与服务端 apply 逻辑也成倍增长；快照模型把这些归并为单次校验 + 合并的开销，在单用户场景下显著降低维护成本。
 
-最后写入者优先（LWW）的固有缺陷是 "离线编辑被在线端的旧版本覆盖"。本地端在每次成功保存后写入 lastSavedAt 水位，加载时仅当云端 savedAt 严格大于水位才覆盖，使该缺陷在常见路径上不再触发。
+合并策略并非真正的 OT / CRDT。同一字段在多端几秒之内交叉改写仍可能丢失早一侧的修改，但在单用户日常路径上几乎不触发；以 id 为 key 的集合 dedup 已经足够覆盖跨端 token 收支记录、看板卡片、愿望清单这些主要场景。
 
 ## 推送通知
 
-番茄到点提醒采用服务端调度链路。番茄启动时，客户端经 server action 向 Upstash QStash 推一条延时 25 分钟的回调消息；到时 QStash 调用 `/api/push/fire`，路由由 web-push 库向用户已注册的 PushSubscription 投递 VAPID 签发的通知载荷，再续推下一条延时消息（缓冲结束 1 分钟）。整条链路在服务端自我递推，使用者关闭浏览器或锁屏后仍可如期收到提醒。
+番茄到点提醒在两条独立通道上送达。
+
+浏览器和 PWA 走 Web Push：番茄启动时客户端经 server action 向 Upstash QStash 推一条延时 25 分钟的回调消息；到时 QStash 回调 server，由 web-push 向用户已注册的订阅投递 VAPID 签发的载荷。整条链路在服务端自我递推下一条延时消息（缓冲结束 1 分钟），使用者关闭浏览器或锁屏后仍可如期收到提醒。
+
+Android 上从 v2.4 起多了一条原生 FCM 通道。Web Push 协议层缺少 high-priority 的开关，到点的通知会被 Android 的 Doze 模式压到下次亮屏才放出来，延迟可达数分钟到十几分钟；原生 FCM 走 firebase-admin 发 priority:high，能透 Doze 即时弹。配套出一个 Capacitor 套壳的 Android APK，装上后 Settings 里点开启推送即注册原生通道。两条通道并行投递、互不替代——浏览器 / PWA 用户照旧拿 Web Push，装了 APK 的设备额外多一份原生投递。
 
 未使用浏览器端 setInterval 或 setTimeout 的原因是这些计时器在标签页隐藏或设备休眠时被严格限速，无法保证在番茄结束的瞬间触发；即便授予了 Notification 权限，浏览器闲置态下的可达性也接近不可用。把调度迁至云端后，提醒可达性与浏览器开启状态解耦。
 
-每条消息的 sessionId 由番茄启动瞬间的时间戳派生。使用者手动跳过缓冲时 sessionId 会被重写，旧链路上残留的回调到达 `/api/push/fire` 时与当前 sessionId 失配，按设计静默退出，无须显式取消。
+每条消息的 sessionId 由番茄启动瞬间的时间戳派生。使用者手动跳过缓冲时 sessionId 会被重写，旧链路上残留的回调到达时与当前 sessionId 失配，按设计静默退出，无须显式取消。
+
+## Android APK
+
+每个 v* tag 触发 GitHub Actions 自动构建 arm64-v8a 的 release-signed APK，附在对应的 GitHub Release 下面。最新版：[releases/latest](https://github.com/NihilDigit/tokmato/releases/latest)。
+
+不上 Play Store，sideload 自用。装上后跟网页 PWA 体验等价，唯一差别是推送走原生 FCM 而非 Web Push。
 
 ## 跨端只读 awareness
 
@@ -58,15 +68,16 @@ https://tokmato.nihildigit.dev
 ## 已知取舍
 
 - 应用面向单用户单账号设计，不支持多用户共享、团队协作或代理代办场景。
-- 同步策略为最后写入者优先（LWW），并非真正的冲突解决；双端在同一秒内修改同一字段时可能丢失其中一方。单用户场景下该竞态的发生概率极低。
+- 同步策略为按 id 去重的合并，并非真正的 OT / CRDT；同一字段在多端几秒之内交叉改写仍可能丢失早一侧的修改。单用户场景下该竞态的发生概率极低。
+- Android APK 用于绕开 Doze；OEM（小米 / 华为 / OPPO / vivo）自带的更激进省电策略可能盖过 priority:high，priority:high 不是绝对保障。
 - 主要目标群体是 ADHD 倾向的考研使用者，部分交互（长按结束、径向手势看板、4am 日界）针对其注意与决策模式优化，对其他使用者可能显得冗余。
 - 数学 tag 阶梯奖（5 / 7 / 9 / 11）的阈值依据作者考研数学复习节奏手工标定，未必适用其他使用场景。
 
 ## 功能
 
 - 番茄钟（25 + 1 缓冲），基于 wall-clock 计时，标签页隐藏或设备休眠不漂移
-- Web Push 通知，浏览器关闭后仍可送达
-- 多设备自动同步（GitHub 登录），LWW 仲裁
+- 双通道推送：Web Push（浏览器 / PWA）+ 原生 FCM（Android APK），后者 priority:high 绕 Doze
+- 多设备自动同步（GitHub 登录），id 去重合并而非全量覆盖
 - 跨端只读 awareness：一端运行时其他端自动只读镜像
 - 看板：四象限 + 收件箱，移动端径向手势移动
 - 数学 tag 每天 5 / 7 / 9 / 11 个番茄，每挡额外 +1 FToken
@@ -75,9 +86,9 @@ https://tokmato.nihildigit.dev
 
 ## 技术栈
 
-Next.js 16 / React 19 / Tailwind 4 / shadcn/ui / Zustand / Auth.js v5 / Upstash Redis & QStash / web-push / Bun。Vercel 部署。
+Next.js 16 / React 19 / Tailwind 4 / shadcn/ui / Zustand / Auth.js v5 / Upstash Redis & QStash / web-push / firebase-admin / Capacitor 8 / Bun。Vercel 部署 web，GitHub Actions 出 APK。
 
-设计规范见 `.impeccable.md`，工程文档见 `CLAUDE.md`。
+设计规范见 `.impeccable.md`，工程文档见 `CLAUDE.md`，Android 套壳的演化记录见 `capacitor/EXPERIMENT.md`。
 
 ## 开发
 
@@ -92,11 +103,17 @@ bun run build
 ## 发布
 
 ```bash
-git tag v1.x
-git push --tags
+git tag -a v2.x --cleanup=verbatim -m "$(cat <<'EOF'
+v2.x — subject
+
+## 主要变化
+...
+EOF
+)"
+git push origin main v2.x
 ```
 
-GitHub Action 在构建阶段注入 `NEXT_PUBLIC_APP_VERSION`，UI 版本号随标签自动更新。
+每个 v* tag 触发两条 workflow：一条把 web 部署到 Vercel，一条用 GitHub Actions runner build arm64-v8a Android APK 并发布 GitHub Release（release notes 取自 tag 注解，APK 自动 attach）。`NEXT_PUBLIC_APP_VERSION` 在 build 阶段注入，UI 版本号随 tag 自动更新。
 
 ## 许可
 
