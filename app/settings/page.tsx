@@ -134,7 +134,12 @@ export default function SettingsPage() {
       }
     } catch (e) {
       console.error("[settings] enablePush failed", e);
-      setPushMsg("开启失败");
+      // Surface the real reason instead of a generic "开启失败" so
+      // platform-specific failures (FCM register error, missing
+      // plugin, etc.) are immediately diagnosable from the settings
+      // surface without needing remote DevTools.
+      const reason = e instanceof Error ? e.message : String(e);
+      setPushMsg(`开启失败：${reason}`);
     } finally {
       setPushBusy(false);
     }

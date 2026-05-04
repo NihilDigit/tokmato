@@ -154,31 +154,50 @@ async function enableNativePush(
   cap: CapacitorBridge
 ): Promise<{ native: true; token: string } | null> {
   const Push = cap.Plugins?.PushNotifications;
-  if (!Push) return null;
+  if (!Push) {
+    throw new Error("Capacitor PushNotifications plugin missing");
+  }
   const perm = await Push.requestPermissions();
-  if (perm.receive !== "granted") return null;
+  if (perm.receive !== "granted") {
+    // Match the web caller's contract: null on permission denial so
+    // settings shows the same "未授予权限/权限被拒" branch.
+    return null;
+  }
   // The plugin emits 'registration' asynchronously after register();
-  // race it against an error to avoid hanging forever.
-  const token = await new Promise<string | null>((resolve) => {
+  // race it against the error event to avoid hanging forever and
+  // surface the underlying reason if registration fails (FCM init,
+  // missing google-services.json, network blip, etc.).
+  const result = await new Promise<{ ok: true; token: string } | { ok: false; reason: string }>((resolve) => {
     const cleanup: Array<() => Promise<void>> = [];
-    const timer = setTimeout(() => finish(null), 15_000);
-    const finish = async (value: string | null) => {
+    const timer = setTimeout(
+      () => void finish({ ok: false, reason: "FCM register timed out after 15s" }),
+      15_000,
+    );
+    const finish = async (
+      value: { ok: true; token: string } | { ok: false; reason: string },
+    ) => {
       clearTimeout(timer);
       for (const fn of cleanup) await fn().catch(() => undefined);
       resolve(value);
     };
     Push.addListener("registration", (data) => {
-      if (data.value) void finish(data.value);
+      if (data.value) void finish({ ok: true, token: data.value });
     }).then((sub) => cleanup.push(sub.remove));
-    Push.addListener("registrationError", () => void finish(null)).then(
-      (sub) => cleanup.push(sub.remove)
-    );
-    void Push.register();
+    Push.addListener("registrationError", (data) => {
+      const reason = data.error || "FCM registration error (no detail)";
+      void finish({ ok: false, reason });
+    }).then((sub) => cleanup.push(sub.remove));
+    Push.register().catch((e) => {
+      const reason = e instanceof Error ? e.message : String(e);
+      void finish({ ok: false, reason: `register() threw: ${reason}` });
+    });
   });
-  if (!token) return null;
-  writeNativeToken(token);
-  await saveFcmToken(token);
-  return { native: true, token };
+  if (!result.ok) {
+    throw new Error(result.reason);
+  }
+  writeNativeToken(result.token);
+  await saveFcmToken(result.token);
+  return { native: true, token: result.token };
 }
 
 export async function disablePush(): Promise<void> {
