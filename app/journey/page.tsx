@@ -85,8 +85,23 @@ export default function JourneyPage() {
     totalHours: recentRecordsAll.reduce((sum, r) => sum + r.minutes, 0) / 60,
     totalF: recentTokens.reduce((sum, r) => sum + Math.max(0, r.fDelta), 0),
     totalH: recentTokens.reduce((sum, r) => sum + Math.max(0, r.hDelta), 0),
-    longestStreak: longestStreak(last30Keys, recentRecordsAll),
   };
+
+  // Per-day positive-delta sums for the trend chart. Matches the
+  // earned-only framing of totalF / totalH above so the line peaks
+  // correspond visibly to the totals shown in the stats row.
+  const dailyEarned = useMemo(() => {
+    const f = new Map<string, number>();
+    const h = new Map<string, number>();
+    for (const e of recentTokens) {
+      if (e.fDelta > 0) f.set(e.dayKey, (f.get(e.dayKey) ?? 0) + e.fDelta);
+      if (e.hDelta > 0) h.set(e.dayKey, (h.get(e.dayKey) ?? 0) + e.hDelta);
+    }
+    return {
+      f: last30Keys.map((k) => f.get(k) ?? 0),
+      h: last30Keys.map((k) => h.get(k) ?? 0),
+    };
+  }, [recentTokens, last30Keys]);
 
   const distribution: { tag: TagConfig; pct: number }[] = useMemo(() => {
     const total = recentRecordsAll.reduce((sum, r) => sum + r.count, 0);
@@ -145,8 +160,8 @@ export default function JourneyPage() {
         </h1>
       </header>
 
-      {/* 5 stats — hairline-divided. 2 cols mobile, 5 cols on wide */}
-      <section className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-rule bg-rule wide:grid-cols-5">
+      {/* 4 stats — hairline-divided. 2 cols mobile, 4 cols on wide */}
+      <section className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-rule bg-rule wide:grid-cols-4">
         <BalanceCell kicker="番茄" value={stats.totalPomos.toLocaleString()} />
         <BalanceCell kicker="学习" value={stats.totalHours.toFixed(1)} unit="h" />
         <BalanceCell
@@ -161,12 +176,9 @@ export default function JourneyPage() {
           unit="❖"
           color="text-sage"
         />
-        <BalanceCell
-          kicker="最长连续学习"
-          value={stats.longestStreak}
-          unit="天"
-        />
       </section>
+
+      <TrendSection fSeries={dailyEarned.f} hSeries={dailyEarned.h} />
 
       {/* Heatmap (left 50%) + Donut (right 50%) — single visual section */}
       <section className="flex flex-col gap-4">
@@ -481,26 +493,6 @@ function SectionHead({
   );
 }
 
-function longestStreak(
-  dayKeys: string[],
-  records: { dayKey: string; count: number }[],
-) {
-  const active = new Set(
-    records.filter((record) => record.count > 0).map((record) => record.dayKey),
-  );
-  let best = 0;
-  let current = 0;
-  for (const key of dayKeys) {
-    if (active.has(key)) {
-      current += 1;
-      best = Math.max(best, current);
-    } else {
-      current = 0;
-    }
-  }
-  return best;
-}
-
 function formatRecordTime(time: number) {
   const d = new Date(time);
   const now = new Date();
@@ -528,6 +520,224 @@ function exportJourneyJson(records: unknown[]) {
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+}
+
+// Trend — F / H per-day earned. 7d / 30d toggle.
+// Series come pre-sliced as the full 30-day arrays (oldest → today);
+// this component just tail-slices to 7 when needed.
+function TrendSection({
+  fSeries,
+  hSeries,
+}: {
+  fSeries: number[];
+  hSeries: number[];
+}) {
+  const [range, setRange] = useState<7 | 30>(30);
+  const f = range === 7 ? fSeries.slice(-7) : fSeries;
+  const h = range === 7 ? hSeries.slice(-7) : hSeries;
+
+  return (
+    <section className="flex flex-col gap-4">
+      <SectionHead
+        kicker="F · H"
+        title="走势"
+        right={
+          <div className="inline-flex gap-1.5">
+            {[7, 30].map((n) => {
+              const active = range === n;
+              return (
+                <button
+                  key={n}
+                  type="button"
+                  onClick={() => setRange(n as 7 | 30)}
+                  className={cn(
+                    "mono rounded-full border px-3 py-1 text-xs transition",
+                    active
+                      ? "border-transparent bg-ink text-paper"
+                      : "border-rule text-ink-3 hover:border-ink/30 hover:text-ink",
+                  )}
+                >
+                  {n} 天
+                </button>
+              );
+            })}
+          </div>
+        }
+      />
+
+      <div className="rounded-xl border border-rule bg-paper p-5">
+        <TrendChart fSeries={f} hSeries={h} />
+        <div className="mono mt-3.5 flex items-center justify-between text-[11px] text-ink-mute">
+          <span>{range} 天前</span>
+          <div className="flex items-center gap-3">
+            <span className="inline-flex items-center gap-1.5">
+              <span className="h-2 w-2 rounded-full bg-tomato" aria-hidden />F
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="h-2 w-2 rounded-full bg-sage" aria-hidden />H
+            </span>
+          </div>
+          <span>今天</span>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function TrendChart({
+  fSeries,
+  hSeries,
+}: {
+  fSeries: number[];
+  hSeries: number[];
+}) {
+  const N = fSeries.length;
+  const W = 600;
+  const H = 160;
+  const pad = { l: 32, r: 12, t: 14, b: 10 };
+  const iw = W - pad.l - pad.r;
+  const ih = H - pad.t - pad.b;
+  const max = Math.max(1, ...fSeries, ...hSeries);
+  // Round max up to a "nice" tick so the y-axis label reads as a clean
+  // integer rather than a noisy actual maximum.
+  const niceMax = (() => {
+    if (max <= 5) return 5;
+    if (max <= 10) return 10;
+    const pow = Math.pow(10, Math.floor(Math.log10(max)));
+    return Math.ceil(max / pow) * pow;
+  })();
+
+  const xAt = (i: number) =>
+    pad.l + (N <= 1 ? iw / 2 : (i / (N - 1)) * iw);
+  const yAt = (v: number) => pad.t + (1 - v / niceMax) * ih;
+
+  const buildPath = (series: number[]) =>
+    series
+      .map((v, i) => `${i === 0 ? "M" : "L"} ${xAt(i)} ${yAt(v)}`)
+      .join(" ");
+  const buildArea = (series: number[]) => {
+    const last = series.length - 1;
+    return `${buildPath(series)} L ${xAt(last)} ${yAt(0)} L ${xAt(0)} ${yAt(0)} Z`;
+  };
+
+  const fPath = buildPath(fSeries);
+  const hPath = buildPath(hSeries);
+  const fArea = buildArea(fSeries);
+  const hArea = buildArea(hSeries);
+
+  const total = (s: number[]) => s.reduce((a, b) => a + b, 0);
+  const ariaLabel = `走势：F 累计 ${total(fSeries)}，H 累计 ${total(hSeries)}，最高单日 ${max}`;
+
+  // 7d view shows dots (each day matters); 30d view drops them so the
+  // line itself is the signal and dots don't crowd into noise.
+  const showDots = N <= 7;
+  const dotR = 3.5;
+
+  return (
+    <svg
+      viewBox={`0 0 ${W} ${H}`}
+      className="h-auto w-full"
+      role="img"
+      aria-label={ariaLabel}
+    >
+      {/* baseline + max gridline */}
+      <line
+        x1={pad.l}
+        x2={W - pad.r}
+        y1={yAt(0)}
+        y2={yAt(0)}
+        stroke="var(--rule)"
+        strokeWidth={1}
+        vectorEffect="non-scaling-stroke"
+      />
+      <line
+        x1={pad.l}
+        x2={W - pad.r}
+        y1={yAt(niceMax)}
+        y2={yAt(niceMax)}
+        stroke="var(--rule)"
+        strokeWidth={1}
+        strokeDasharray="2 4"
+        vectorEffect="non-scaling-stroke"
+      />
+
+      {/* y-axis labels: 0 (baseline) and niceMax */}
+      <text
+        x={pad.l - 6}
+        y={yAt(0)}
+        dy="0.32em"
+        textAnchor="end"
+        fontSize="10"
+        fill="var(--ink-mute)"
+        fontFamily="var(--font-mono, ui-monospace)"
+      >
+        0
+      </text>
+      <text
+        x={pad.l - 6}
+        y={yAt(niceMax)}
+        dy="0.32em"
+        textAnchor="end"
+        fontSize="10"
+        fill="var(--ink-mute)"
+        fontFamily="var(--font-mono, ui-monospace)"
+      >
+        {niceMax}
+      </text>
+
+      {/* areas — drawn first so lines sit on top */}
+      <path d={hArea} fill="var(--sage)" opacity={0.1} />
+      <path d={fArea} fill="var(--tomato)" opacity={0.1} />
+
+      {/* lines */}
+      <path
+        d={hPath}
+        stroke="var(--sage)"
+        strokeWidth={1.6}
+        fill="none"
+        strokeLinejoin="round"
+        strokeLinecap="round"
+        vectorEffect="non-scaling-stroke"
+      />
+      <path
+        d={fPath}
+        stroke="var(--tomato)"
+        strokeWidth={1.6}
+        fill="none"
+        strokeLinejoin="round"
+        strokeLinecap="round"
+        vectorEffect="non-scaling-stroke"
+      />
+
+      {/* dots — only on 7d view */}
+      {showDots && (
+        <>
+          {hSeries.map((v, i) => (
+            <circle
+              key={`h-${i}`}
+              cx={xAt(i)}
+              cy={yAt(v)}
+              r={dotR}
+              fill="var(--sage)"
+            >
+              <title>{`${N - 1 - i} 天前 · H ${v}`}</title>
+            </circle>
+          ))}
+          {fSeries.map((v, i) => (
+            <circle
+              key={`f-${i}`}
+              cx={xAt(i)}
+              cy={yAt(v)}
+              r={dotR}
+              fill="var(--tomato)"
+            >
+              <title>{`${N - 1 - i} 天前 · F ${v}`}</title>
+            </circle>
+          ))}
+        </>
+      )}
+    </svg>
+  );
 }
 
 function Donut({
