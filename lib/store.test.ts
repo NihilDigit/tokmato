@@ -1098,6 +1098,59 @@ describe("applyMergedSnapshot", () => {
     expect(s().htoken).toBe(10);
   });
 
+  it("local in-flight session survives a cloud merge that has no session", () => {
+    // Regression: applyMergedSnapshot used to wipe local.session with
+    // `cloud.session ?? null`, so a session that had just started locally
+    // (autosave debounce hadn't fired yet) would be erased the moment
+    // auth-establish triggered the auto-load — leaving the active marker
+    // alive on the server while UI fell back to RemoteActiveView.
+    const localSession = {
+      task: "deep work",
+      tag: "study",
+      type: "input",
+      mode: "running" as const,
+      startedAt: NOW,
+      phaseStartedAt: NOW,
+      count: 1,
+    };
+    useStore.setState({
+      session: localSession,
+    });
+    // Cloud snapshot saved before this device's session began — no session.
+    s().applyMergedSnapshot(
+      {
+        ftoken: 0,
+        htoken: 0,
+        tokenHistory: [],
+      },
+      NOW - 10_000,
+    );
+    expect(s().session).toEqual(localSession);
+  });
+
+  it("falls back to cloud session when local has none", () => {
+    const cloudSession = {
+      task: "from another device",
+      tag: "study",
+      type: "input",
+      mode: "running" as const,
+      startedAt: NOW - 60_000,
+      phaseStartedAt: NOW - 60_000,
+      count: 1,
+    };
+    useStore.setState({ session: null });
+    s().applyMergedSnapshot(
+      {
+        ftoken: 0,
+        htoken: 0,
+        tokenHistory: [],
+        session: cloudSession,
+      },
+      NOW,
+    );
+    expect(s().session).toEqual(cloudSession);
+  });
+
   it("is idempotent — re-running with the same cloud snapshot doesn't grow ledger", () => {
     const cloud = {
       ftoken: 5,

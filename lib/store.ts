@@ -387,8 +387,21 @@ export const useStore = create<Store>()(
             recentTasks: Array.from(
               new Set([...local.recentTasks, ...(cloud.recentTasks ?? [])]),
             ).slice(0, 5),
-            session: restoreSession ? (cloud.session ?? null) : null,
-            playSession: restoreSession ? (cloud.playSession ?? null) : null,
+            // Prefer local session over cloud's when local has one in
+            // flight. The auto-load merge fires once on auth-establish
+            // and may race with a session that just started on this
+            // device (autosave debounce hasn't pushed yet). The old
+            // `cloud.session ?? null` formula clobbered the running
+            // session, leaving the active marker alive on the server
+            // while local.session went null — UI fell back to
+            // RemoteActiveView with no way to control the in-flight
+            // pomodoro. Cloud.session only wins when local has nothing.
+            session: restoreSession
+              ? (local.session ?? cloud.session ?? null)
+              : null,
+            playSession: restoreSession
+              ? (local.playSession ?? cloud.playSession ?? null)
+              : null,
             activeDay: today,
             lastSettledDate: cloud.lastSettledDate ?? local.lastSettledDate,
             todayPomos: dayPomos,
