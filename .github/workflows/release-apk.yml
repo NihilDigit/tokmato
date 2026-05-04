@@ -121,7 +121,18 @@ jobs:
           fi
           # `contents:body` strips the first paragraph (the subject
           # line), keeping the structured 主要变化 / 修复 / 工程 body.
-          git tag -l --format='%(contents:body)' "$TAG" > /tmp/notes.md
+          # Awk pass chops the SSH signature block that signed tags
+          # append after the body — git glues the BEGIN marker onto
+          # the last content line so a plain regex skip doesn't catch
+          # it. Cut at the first occurrence regardless of position.
+          git tag -l --format='%(contents:body)' "$TAG" | awk '
+            /-----BEGIN SSH SIGNATURE-----/ {
+              sub(/-----BEGIN SSH SIGNATURE-----.*/, "")
+              print
+              exit
+            }
+            { print }
+          ' > /tmp/notes.md
           if [ ! -s /tmp/notes.md ]; then
             # Lightweight tag or empty body — fall back to subject +
             # auto-generated commit list so the release isn't blank.
