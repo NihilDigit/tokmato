@@ -46,6 +46,7 @@ Manual, semantic. Auto-generated commit lists are flow-of-thought; semantic note
   - **修复** — bug fixes, naming the affected path and who would hit it.
   - **工程** — internal-only changes (test reorgs, CI tweaks, dep bumps).
 - **Style**: same Chinese tech writing discipline as README; the AI-tells blacklist in the global `~/.claude/CLAUDE.md` "文档撰写风格" section applies. Don't write "What's Changed" or commit lists.
+- **Release notes are for humans, not machines**. Audience is future-you reading the changelog, not a downstream integrator. **Never** drop file paths, KV key shapes, function/action names, schema diffs, internal API surfaces into the release. That precision belongs in commit messages and inline docs. The release narrates the *change to the user's mental model*. 工程 section stays headline-only (test reorg / CI tweak / dep bump), no API catalog.
 - **Command** (`--cleanup=verbatim` is **required** — without it git strips every line starting with `#` as a comment, eating the `## 主要变化` / `## 修复` / `## 工程` headings):
   ```bash
   git tag -a v2.X --cleanup=verbatim -m "$(cat <<'EOF'
