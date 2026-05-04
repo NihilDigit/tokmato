@@ -104,11 +104,18 @@ export async function disablePush(): Promise<void> {
   if (!isPushSupported()) return;
   const registration = await navigator.serviceWorker.getRegistration();
   const sub = await registration?.pushManager.getSubscription();
+  // Capture the endpoint BEFORE unsubscribe — Chrome zeroes the
+  // PushSubscription after unsubscribe so we can no longer identify
+  // which row in the multi-device Hash to drop.
+  const endpoint = sub?.endpoint;
   if (sub) await sub.unsubscribe();
   // Server side teardown is best-effort — even if it fails the local
-  // unsubscribe above means the SW won't deliver further pushes.
+  // unsubscribe above means the SW won't deliver further pushes. Pass
+  // the endpoint so we drop only THIS device, not every device the
+  // user has subscribed elsewhere.
+  if (!endpoint) return;
   try {
-    await removePushSubscription();
+    await removePushSubscription(endpoint);
   } catch {
     // ignore
   }

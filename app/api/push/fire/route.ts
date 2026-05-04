@@ -68,10 +68,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true, skipped: "stale-session" });
   }
 
-  const subscription = await redis.get<PushSubscription>(
-    kvKey.pushSubscription(userId)
+  const subs = await redis.hgetall<Record<string, PushSubscription>>(
+    kvKey.pushSubscriptions(userId)
   );
-  if (!subscription) {
+  const subEntries = subs ? Object.entries(subs) : [];
+  if (subEntries.length === 0) {
     return NextResponse.json({ ok: true, skipped: "no-subscription" });
   }
 
@@ -94,20 +95,36 @@ export async function POST(request: Request) {
           body: "时间池里的份额已经用完",
           tag: "tokmato-play",
         };
-  const result = await sendWebPush(subscription, payload);
 
-  // Subscription expired — drop it so we stop scheduling.
-  if (!result.ok && result.reason === "EXPIRED") {
-    await redis.del(kvKey.pushSubscription(userId));
-    await redis.del(kvKey.pushPending(userId));
-    // Marker is still valid — the user might re-subscribe and the
-    // session is genuinely live. We let TTL clear it naturally.
-    return NextResponse.json({ ok: true, dropped: "expired" });
+  // Fan out across every registered device for this user. Failures on
+  // one device should not block delivery to others, so we await all
+  // settles in parallel and prune 410-expired endpoints afterwards.
+  const results = await Promise.all(
+    subEntries.map(async ([field, sub]) => ({
+      field,
+      result: await sendWebPush(sub, payload),
+    }))
+  );
+  const expiredFields = results
+    .filter((r) => !r.result.ok && r.result.reason === "EXPIRED")
+    .map((r) => r.field);
+  if (expiredFields.length > 0) {
+    await redis.hdel(kvKey.pushSubscriptions(userId), ...expiredFields);
   }
-  // Other errors: log but proceed to schedule next link — a transient
-  // delivery failure shouldn't break the chain forever.
-  if (!result.ok && process.env.NODE_ENV !== "production") {
-    console.warn("[push/fire] delivery failed", result);
+  if (process.env.NODE_ENV !== "production") {
+    for (const r of results) {
+      if (!r.result.ok && r.result.reason !== "EXPIRED") {
+        console.warn("[push/fire] delivery failed", r.field, r.result);
+      }
+    }
+  }
+
+  // Every device for this user expired — drop the chain. The session
+  // marker can stay (TTL clears it); a re-subscribe mid-chain would
+  // need a new chain anyway.
+  if (expiredFields.length === subEntries.length) {
+    await redis.del(kvKey.pushPending(userId));
+    return NextResponse.json({ ok: true, dropped: "expired-all" });
   }
 
   // play-end is single-fire — wipe pending and exit. No active marker

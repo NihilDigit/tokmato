@@ -38,7 +38,11 @@ export const kvKey = {
   userState: (userId: string) => `tokmato:user:${userId}:state`,
   pomodoros: (userId: string, dateKey: string) =>
     `tokmato:user:${userId}:pomos:${dateKey}`, // dateKey: YYYY-MM-DD (UTC+8 with 4am cutoff)
-  pushSubscription: (userId: string) => `tokmato:user:${userId}:push:sub`,
+  /** Multi-device push subscriptions, kept as a Redis Hash keyed by
+   *  the truncated sha1 of `subscription.endpoint`. Replaces the v2.2.x
+   *  single-key layout (`push:sub`) — one device used to overwrite the
+   *  next, so only the latest-subscribed device received notifications. */
+  pushSubscriptions: (userId: string) => `tokmato:user:${userId}:push:subs`,
   /** Currently-pending QStash messageId for the next phase boundary. */
   pushPending: (userId: string) => `tokmato:user:${userId}:push:pending`,
   /** Cross-device "another device is running a pomodoro" read-only marker.

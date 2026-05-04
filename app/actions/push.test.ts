@@ -27,10 +27,15 @@ describeIf("push server actions (real Redis + QStash)", async () => {
     await import("./push");
   const { redis } = await import("@/lib/kv");
 
+  const SUBS_KEY = `tokmato:user:${TEST_USER_ID}:push:subs`;
+  const LEGACY_SUB_KEY = `tokmato:user:${TEST_USER_ID}:push:sub`;
+  const PENDING_KEY = `tokmato:user:${TEST_USER_ID}:push:pending`;
+
   async function cleanup() {
     if (!redis) return;
-    await redis.del(`tokmato:user:${TEST_USER_ID}:push:sub`);
-    await redis.del(`tokmato:user:${TEST_USER_ID}:push:pending`);
+    await redis.del(SUBS_KEY);
+    await redis.del(LEGACY_SUB_KEY);
+    await redis.del(PENDING_KEY);
   }
 
   beforeEach(async () => {
@@ -47,18 +52,37 @@ describeIf("push server actions (real Redis + QStash)", async () => {
     await expect(savePushSubscription(null)).rejects.toThrow("INVALID_PAYLOAD");
   });
 
-  it("savePushSubscription stores a valid subscription, removePushSubscription deletes it", async () => {
-    const sub = {
-      endpoint: "https://updates.push.services.mozilla.com/wpush/v1/test",
-      keys: { p256dh: "BX-fake-key", auth: "auth-fake" },
+  it("savePushSubscription stores into the Hash and clears the legacy key; targeted remove drops only that endpoint", async () => {
+    const subA = {
+      endpoint: "https://updates.push.services.mozilla.com/wpush/v1/device-A",
+      keys: { p256dh: "BX-fake-A", auth: "auth-A" },
     };
-    await savePushSubscription(sub);
-    const stored = await redis!.get(`tokmato:user:${TEST_USER_ID}:push:sub`);
-    expect(stored).toMatchObject({ endpoint: sub.endpoint });
+    const subB = {
+      endpoint: "https://updates.push.services.mozilla.com/wpush/v1/device-B",
+      keys: { p256dh: "BX-fake-B", auth: "auth-B" },
+    };
+    // Seed a legacy single-key sub to verify the migration sweep.
+    await redis!.set(LEGACY_SUB_KEY, { endpoint: "legacy", keys: { p256dh: "x", auth: "y" } });
 
+    await savePushSubscription(subA);
+    await savePushSubscription(subB);
+
+    const stored = await redis!.hgetall<Record<string, { endpoint: string }>>(SUBS_KEY);
+    expect(stored).not.toBeNull();
+    const endpoints = Object.values(stored!).map((s) => s.endpoint).sort();
+    expect(endpoints).toEqual([subA.endpoint, subB.endpoint].sort());
+    // Legacy key got swept on first save.
+    expect(await redis!.get(LEGACY_SUB_KEY)).toBeNull();
+
+    // Targeted remove drops just A.
+    await removePushSubscription(subA.endpoint);
+    const afterA = await redis!.hgetall<Record<string, { endpoint: string }>>(SUBS_KEY);
+    const remaining = Object.values(afterA ?? {}).map((s) => s.endpoint);
+    expect(remaining).toEqual([subB.endpoint]);
+
+    // Untargeted remove tears down everything.
     await removePushSubscription();
-    const after = await redis!.get(`tokmato:user:${TEST_USER_ID}:push:sub`);
-    expect(after).toBeNull();
+    expect(await redis!.hgetall(SUBS_KEY)).toBeNull();
   });
 
   it("startPushChain refuses without an authenticated session", async () => {
@@ -100,14 +124,14 @@ describeIf("push server actions (real Redis + QStash)", async () => {
       expect(res.scheduled).toBe(true);
 
       const pending = await redis!.get<{ messageId: string; sessionId: string }>(
-        `tokmato:user:${TEST_USER_ID}:push:pending`
+        PENDING_KEY
       );
       expect(pending).not.toBeNull();
       expect(pending!.sessionId).toBe("smoke-session");
       expect(typeof pending!.messageId).toBe("string");
 
       await cancelPushChain();
-      const after = await redis!.get(`tokmato:user:${TEST_USER_ID}:push:pending`);
+      const after = await redis!.get(PENDING_KEY);
       expect(after).toBeNull();
     }, 15_000);
 
@@ -125,7 +149,7 @@ describeIf("push server actions (real Redis + QStash)", async () => {
         count: 1,
       });
       const first = await redis!.get<{ messageId: string; sessionId: string }>(
-        `tokmato:user:${TEST_USER_ID}:push:pending`
+        PENDING_KEY
       );
       expect(first?.sessionId).toBe("session-A");
 
@@ -137,7 +161,7 @@ describeIf("push server actions (real Redis + QStash)", async () => {
         count: 2,
       });
       const second = await redis!.get<{ messageId: string; sessionId: string }>(
-        `tokmato:user:${TEST_USER_ID}:push:pending`
+        PENDING_KEY
       );
       expect(second?.sessionId).toBe("session-B");
       // Different message — the old chain's pending pointer was overwritten,

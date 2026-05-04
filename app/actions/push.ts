@@ -3,24 +3,29 @@
 /**
  * Server actions for Web Push subscription + scheduling.
  *
+ * Each user can have multiple devices subscribed concurrently — subs
+ * live in a Redis Hash keyed by sha1(endpoint), so registering a
+ * second device no longer evicts the first. /api/push/fire fans out
+ * to every surviving sub on each delivery and prunes 410-expired ones.
+ *
  * Lifecycle:
- *   savePushSubscription(sub)     — client posts its PushSubscription
- *   removePushSubscription()      — user toggles off
- *   startPushChain({ sessionId,
- *                    boundaryAt,
- *                    kind,
- *                    count })     — fires when a session begins or
- *                                    after a manual phase advance.
- *                                    Invalidates any prior chain by
- *                                    rotating `active-session`.
- *   cancelPushChain()             — endSession; future chain links
- *                                    no-op when they see the mismatch.
+ *   savePushSubscription(sub)        — register THIS device
+ *   removePushSubscription(endpoint?) — drop one device by endpoint;
+ *                                      no arg = drop all devices for
+ *                                      this user (panic teardown)
+ *   startPushChain({ sessionId, ... }) — fires at session start or
+ *                                      after manual phase advance.
+ *                                      Rotating sessionId invalidates
+ *                                      any in-flight chain.
+ *   cancelPushChain()                — endSession; future chain links
+ *                                      no-op on sessionId mismatch.
  *
  * The chain itself self-perpetuates inside `/api/push/fire` — each
  * delivered notification schedules the next boundary, so the client
  * doesn't need to be open at every transition.
  */
 
+import { createHash } from "node:crypto";
 import { auth } from "@/auth";
 import { requireRedis, kvKey } from "@/lib/kv";
 import {
@@ -71,6 +76,15 @@ async function getUserId(): Promise<string> {
   return id;
 }
 
+/** Stable, short field name for a subscription within the Hash. We
+ *  truncate to 16 hex chars — enough to make collisions vanishingly
+ *  unlikely in a per-user namespace and short enough to keep dashboards
+ *  readable. The full endpoint lives in the Hash value. */
+function endpointField(endpoint: string): string {
+  return createHash("sha1").update(endpoint).digest("hex").slice(0, 16);
+}
+
+const oldSingleSubKey = (userId: string) => `tokmato:user:${userId}:push:sub`;
 
 export async function savePushSubscription(
   raw: unknown
@@ -79,17 +93,44 @@ export async function savePushSubscription(
   const parsed = pushSubscriptionSchema.safeParse(raw);
   if (!parsed.success) throw new PushError("INVALID_PAYLOAD");
   const redis = requireRedis();
-  await redis.set(kvKey.pushSubscription(userId), parsed.data);
+  await redis.hset(kvKey.pushSubscriptions(userId), {
+    [endpointField(parsed.data.endpoint)]: parsed.data,
+  });
+  // One-shot migration: opportunistically drop the v2.2.x single-sub
+  // key the first time a device re-subscribes under the new layout.
+  // Cheap to retry; harmless when already absent.
+  await redis.del(oldSingleSubKey(userId));
   return { ok: true };
 }
 
-export async function removePushSubscription(): Promise<{ ok: true }> {
+const removeArgSchema = z
+  .union([z.string().url().max(2_000), z.undefined()])
+  .optional();
+
+/**
+ * Drop a subscription. Pass the endpoint to drop only that device;
+ * pass nothing to drop every device for this user.
+ *
+ * The "drop all" mode also tears down the active chain — there's
+ * nothing to deliver to, so QStash credits would be wasted. Single-
+ * device removal leaves the chain alive: the user's other devices
+ * still want their boundary alerts.
+ */
+export async function removePushSubscription(
+  endpoint?: string
+): Promise<{ ok: true }> {
   const userId = await getUserId();
+  const parsed = removeArgSchema.safeParse(endpoint);
+  if (!parsed.success) throw new PushError("INVALID_PAYLOAD");
   const redis = requireRedis();
-  await redis.del(kvKey.pushSubscription(userId));
-  // Also tear down any active chain — no point firing notifications
-  // to an endpoint we just dropped.
+  if (parsed.data) {
+    await redis.hdel(kvKey.pushSubscriptions(userId), endpointField(parsed.data));
+    return { ok: true };
+  }
+  await redis.del(kvKey.pushSubscriptions(userId));
   await redis.del(kvKey.pushPending(userId));
+  // Migration: also nuke the legacy single-sub key on a panic teardown.
+  await redis.del(oldSingleSubKey(userId));
   return { ok: true };
 }
 
@@ -113,8 +154,8 @@ export async function startPushChain(
   }
 
   const redis = requireRedis();
-  const sub = await redis.get(kvKey.pushSubscription(userId));
-  if (!sub) {
+  const subCount = await redis.hlen(kvKey.pushSubscriptions(userId));
+  if (subCount === 0) {
     // User hasn't subscribed yet — no-op.
     return { ok: true, scheduled: false };
   }
