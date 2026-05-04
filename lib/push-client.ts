@@ -30,16 +30,25 @@ const VAPID_PUBLIC = process.env.NEXT_PUBLIC_WEB_PUSH_VAPID_PUBLIC_KEY ?? "";
 
 // Capacitor injects this global into the WebView. Outside the APK
 // it's undefined and we fall back to the Web Push path.
+//
+// Note on return shapes: when the JS package `@capacitor/push-
+// notifications` is imported, every method returns a Promise. But
+// when accessed via the global `window.Capacitor.Plugins.*`, the
+// bridge returns `addListener` synchronously and may return other
+// methods sync too. We model the return as "thenable-or-direct" and
+// normalize at every call site with `Promise.resolve(...)`.
+type ListenerHandle = { remove: () => Promise<void> | void };
+type ThenableOr<T> = T | Promise<T>;
 type CapacitorBridge = {
   isNativePlatform: () => boolean;
   Plugins?: {
     PushNotifications?: {
-      requestPermissions: () => Promise<{ receive: "granted" | "denied" | "prompt" }>;
-      register: () => Promise<void>;
+      requestPermissions: () => ThenableOr<{ receive: "granted" | "denied" | "prompt" | "prompt-with-rationale" }>;
+      register: () => ThenableOr<void>;
       addListener: (
         event: "registration" | "registrationError" | "pushNotificationReceived",
         handler: (data: { value?: string; error?: string }) => void
-      ) => Promise<{ remove: () => Promise<void> }>;
+      ) => ThenableOr<ListenerHandle>;
     };
   };
 };
@@ -79,7 +88,17 @@ export function isPushSupported(): boolean {
 }
 
 export function getPermission(): NotificationPermission | "unsupported" {
-  if (!isPushSupported()) return "unsupported";
+  if (typeof window === "undefined") return "unsupported";
+  // Native runs through FCM, not the Web Notification API. Reflect
+  // the most useful approximation: granted if we've already saved a
+  // token, default otherwise. The Settings UI uses this to choose
+  // between "未授予权限" and "权限被拒" copy after a failed enablePush
+  // call — for native, the more specific reason already comes back
+  // through the thrown error message.
+  if (getCapacitor()) {
+    return readNativeToken() ? "granted" : "default";
+  }
+  if (!("Notification" in window)) return "unsupported";
   return Notification.permission;
 }
 
@@ -168,7 +187,7 @@ async function enableNativePush(
   // surface the underlying reason if registration fails (FCM init,
   // missing google-services.json, network blip, etc.).
   const result = await new Promise<{ ok: true; token: string } | { ok: false; reason: string }>((resolve) => {
-    const cleanup: Array<() => Promise<void>> = [];
+    const cleanup: Array<() => Promise<void> | void> = [];
     const timer = setTimeout(
       () => void finish({ ok: false, reason: "FCM register timed out after 15s" }),
       15_000,
@@ -177,20 +196,36 @@ async function enableNativePush(
       value: { ok: true; token: string } | { ok: false; reason: string },
     ) => {
       clearTimeout(timer);
-      for (const fn of cleanup) await fn().catch(() => undefined);
+      for (const fn of cleanup) {
+        try {
+          await fn();
+        } catch {
+          // best-effort cleanup
+        }
+      }
       resolve(value);
     };
-    Push.addListener("registration", (data) => {
-      if (data.value) void finish({ ok: true, token: data.value });
-    }).then((sub) => cleanup.push(sub.remove));
-    Push.addListener("registrationError", (data) => {
-      const reason = data.error || "FCM registration error (no detail)";
-      void finish({ ok: false, reason });
-    }).then((sub) => cleanup.push(sub.remove));
-    Push.register().catch((e) => {
-      const reason = e instanceof Error ? e.message : String(e);
-      void finish({ ok: false, reason: `register() threw: ${reason}` });
-    });
+    // The global `Capacitor.Plugins.PushNotifications.addListener`
+    // returns the handle synchronously; only the npm-imported wrapper
+    // wraps it in Promise<handle>. Promise.resolve normalizes both
+    // shapes so we always get a thenable cleanup pointer.
+    Promise.resolve(
+      Push.addListener("registration", (data) => {
+        if (data.value) void finish({ ok: true, token: data.value });
+      }),
+    ).then((sub) => cleanup.push(sub.remove));
+    Promise.resolve(
+      Push.addListener("registrationError", (data) => {
+        const reason = data.error || "FCM registration error (no detail)";
+        void finish({ ok: false, reason });
+      }),
+    ).then((sub) => cleanup.push(sub.remove));
+    Promise.resolve()
+      .then(() => Push.register())
+      .catch((e) => {
+        const reason = e instanceof Error ? e.message : String(e);
+        void finish({ ok: false, reason: `register() threw: ${reason}` });
+      });
   });
   if (!result.ok) {
     throw new Error(result.reason);
