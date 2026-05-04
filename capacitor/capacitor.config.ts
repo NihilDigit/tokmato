@@ -13,6 +13,13 @@ const config: CapacitorConfig = {
     url: "https://tokmato.nihildigit.dev",
     cleartext: false,
     androidScheme: "https",
+    // Whitelist GitHub so the OAuth flow (signin → github → callback)
+    // stays in this WebView with its single cookie jar. Without this
+    // Capacitor punts external hosts to Chrome Custom Tabs, the OAuth
+    // state + pkce cookies get set in the system browser's jar, and
+    // the redirect back to tokmato.nihildigit.dev hits our WebView
+    // with no cookies → Auth.js throws InvalidCheck on every callback.
+    allowNavigation: ["github.com", "*.github.com"],
   },
   android: {
     // Allow mixed content / cleartext — disabled. We only ever talk
