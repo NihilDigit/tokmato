@@ -35,13 +35,16 @@ jobs:
       - name: Pull Vercel environment
         run: bunx vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
 
+      - name: Inject release tag into pulled env
+        # `vercel build` re-exports .vercel/.env.production.local into
+        # process.env before invoking next build, which has been observed
+        # to clobber NEXT_PUBLIC_* set only at the GH step level (v2.5+
+        # bundles all shipped with v2.4 inlined). Writing the tag into
+        # the pulled env file is the only place next build is guaranteed
+        # to see it.
+        run: echo "NEXT_PUBLIC_APP_VERSION=${{ github.event.release.tag_name || github.ref_name }}" >> .vercel/.env.production.local
+
       - name: Build with Vercel
-        env:
-          # Inlined into the bundle by Next.js (NEXT_PUBLIC_*). Tag name
-          # comes from the release event or the v* push that triggered
-          # this workflow — keeps the in-app version label in lockstep
-          # with the deploy.
-          NEXT_PUBLIC_APP_VERSION: ${{ github.event.release.tag_name || github.ref_name }}
         run: bunx vercel build --prod --token="$VERCEL_TOKEN"
 
       - name: Deploy prebuilt output
