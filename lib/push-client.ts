@@ -18,13 +18,59 @@
  * APIs simply aren't there (SSR, old Safari, in-app browsers).
  */
 
-import { savePushSubscription, removePushSubscription } from "@/app/actions/push";
+import {
+  savePushSubscription,
+  removePushSubscription,
+  saveFcmToken,
+  removeFcmToken,
+} from "@/app/actions/push";
 
 const SW_PATH = "/sw.js";
 const VAPID_PUBLIC = process.env.NEXT_PUBLIC_WEB_PUSH_VAPID_PUBLIC_KEY ?? "";
 
+// Capacitor injects this global into the WebView. Outside the APK
+// it's undefined and we fall back to the Web Push path.
+type CapacitorBridge = {
+  isNativePlatform: () => boolean;
+  Plugins?: {
+    PushNotifications?: {
+      requestPermissions: () => Promise<{ receive: "granted" | "denied" | "prompt" }>;
+      register: () => Promise<void>;
+      addListener: (
+        event: "registration" | "registrationError" | "pushNotificationReceived",
+        handler: (data: { value?: string; error?: string }) => void
+      ) => Promise<{ remove: () => Promise<void> }>;
+    };
+  };
+};
+function getCapacitor(): CapacitorBridge | null {
+  if (typeof window === "undefined") return null;
+  const c = (window as unknown as { Capacitor?: CapacitorBridge }).Capacitor;
+  return c?.isNativePlatform?.() ? c : null;
+}
+
+const NATIVE_TOKEN_LS_KEY = "tokmato:fcm-token";
+
+function readNativeToken(): string | null {
+  try {
+    return window.localStorage.getItem(NATIVE_TOKEN_LS_KEY);
+  } catch {
+    return null;
+  }
+}
+function writeNativeToken(token: string | null): void {
+  try {
+    if (token) window.localStorage.setItem(NATIVE_TOKEN_LS_KEY, token);
+    else window.localStorage.removeItem(NATIVE_TOKEN_LS_KEY);
+  } catch {
+    // ignore
+  }
+}
+
 export function isPushSupported(): boolean {
   if (typeof window === "undefined") return false;
+  // Capacitor native runs through FCM; Web Push APIs aren't required.
+  if (getCapacitor()) return true;
   return (
     "Notification" in window &&
     "serviceWorker" in navigator &&
@@ -64,14 +110,18 @@ function urlBase64ToUint8Array(base64: string): ArrayBuffer {
 }
 
 /**
- * Register the SW (if needed), prompt for permission (if needed),
- * subscribe via PushManager, and persist on the server.
+ * Register a push transport for this device.
  *
- * Returns the subscription on success, null on permission denial.
- * Throws on misconfiguration (missing VAPID key) so the caller can
- * surface a real error instead of a silent no-op.
+ * Native (Capacitor): asks the OS for notification permission,
+ * registers with FCM, and ships the resulting token to the server.
+ * Web: registers SW, subscribes via VAPID, persists the subscription.
+ *
+ * Returns a truthy marker on success, null on permission denial.
  */
-export async function enablePush(): Promise<PushSubscription | null> {
+export async function enablePush(): Promise<PushSubscription | { native: true; token: string } | null> {
+  const cap = getCapacitor();
+  if (cap) return enableNativePush(cap);
+
   if (!isPushSupported()) return null;
   if (!VAPID_PUBLIC) throw new Error("VAPID public key is not configured");
 
@@ -100,7 +150,52 @@ export async function enablePush(): Promise<PushSubscription | null> {
   return subscription;
 }
 
+async function enableNativePush(
+  cap: CapacitorBridge
+): Promise<{ native: true; token: string } | null> {
+  const Push = cap.Plugins?.PushNotifications;
+  if (!Push) return null;
+  const perm = await Push.requestPermissions();
+  if (perm.receive !== "granted") return null;
+  // The plugin emits 'registration' asynchronously after register();
+  // race it against an error to avoid hanging forever.
+  const token = await new Promise<string | null>((resolve) => {
+    const cleanup: Array<() => Promise<void>> = [];
+    const timer = setTimeout(() => finish(null), 15_000);
+    const finish = async (value: string | null) => {
+      clearTimeout(timer);
+      for (const fn of cleanup) await fn().catch(() => undefined);
+      resolve(value);
+    };
+    Push.addListener("registration", (data) => {
+      if (data.value) void finish(data.value);
+    }).then((sub) => cleanup.push(sub.remove));
+    Push.addListener("registrationError", () => void finish(null)).then(
+      (sub) => cleanup.push(sub.remove)
+    );
+    void Push.register();
+  });
+  if (!token) return null;
+  writeNativeToken(token);
+  await saveFcmToken(token);
+  return { native: true, token };
+}
+
 export async function disablePush(): Promise<void> {
+  const cap = getCapacitor();
+  if (cap) {
+    const token = readNativeToken();
+    writeNativeToken(null);
+    if (token) {
+      try {
+        await removeFcmToken(token);
+      } catch {
+        // ignore
+      }
+    }
+    return;
+  }
+
   if (!isPushSupported()) return;
   const registration = await navigator.serviceWorker.getRegistration();
   const sub = await registration?.pushManager.getSubscription();
@@ -121,7 +216,13 @@ export async function disablePush(): Promise<void> {
   }
 }
 
-export async function getCurrentSubscription(): Promise<PushSubscription | null> {
+export async function getCurrentSubscription(): Promise<
+  PushSubscription | { native: true; token: string } | null
+> {
+  if (getCapacitor()) {
+    const token = readNativeToken();
+    return token ? { native: true, token } : null;
+  }
   if (!isPushSupported()) return null;
   const registration = await navigator.serviceWorker.getRegistration();
   return (await registration?.pushManager.getSubscription()) ?? null;

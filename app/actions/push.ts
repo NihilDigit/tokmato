@@ -1,22 +1,28 @@
 "use server";
 
 /**
- * Server actions for Web Push subscription + scheduling.
+ * Server actions for push subscription + scheduling.
  *
- * Each user can have multiple devices subscribed concurrently — subs
- * live in a Redis Hash keyed by sha1(endpoint), so registering a
- * second device no longer evicts the first. /api/push/fire fans out
- * to every surviving sub on each delivery and prunes 410-expired ones.
+ * Two transports run side by side:
+ *   - Web Push (browsers and PWAs) — `pushSubscriptions` Hash, sub keyed
+ *     by sha1(endpoint).
+ *   - Native FCM (the Capacitor Android app) — `fcmTokens` Hash, token
+ *     keyed by sha1(token). Native FCM gets priority:high and bypasses
+ *     Doze on locked screens; web push cannot.
+ *
+ * Both Hashes carry many devices per user — registering on a second
+ * device no longer evicts the first. /api/push/fire fans out to every
+ * surviving entry on each delivery and prunes expired ones.
  *
  * Lifecycle:
- *   savePushSubscription(sub)        — register THIS device
- *   removePushSubscription(endpoint?) — drop one device by endpoint;
- *                                      no arg = drop all devices for
- *                                      this user (panic teardown)
- *   startPushChain({ sessionId, ... }) — fires at session start or
- *                                      after manual phase advance.
- *                                      Rotating sessionId invalidates
- *                                      any in-flight chain.
+ *   savePushSubscription(sub)        — register a Web Push device
+ *   removePushSubscription(endpoint?) — drop one or all Web Push devices
+ *   saveFcmToken(token)              — register a Capacitor device
+ *   removeFcmToken(token?)           — drop one or all FCM tokens
+ *   startPushChain({ sessionId, ... }) — fires at session start or after
+ *                                      manual phase advance. Rotating
+ *                                      sessionId invalidates any
+ *                                      in-flight chain.
  *   cancelPushChain()                — endSession; future chain links
  *                                      no-op on sessionId mismatch.
  *
@@ -134,6 +140,53 @@ export async function removePushSubscription(
   return { ok: true };
 }
 
+const fcmTokenSchema = z.string().min(40).max(500);
+
+/** Field name for an FCM token in the per-user Hash. Same shape as
+ *  `endpointField` for web push subs — sha1 truncated to 16 hex chars. */
+function fcmTokenField(token: string): string {
+  return createHash("sha1").update(token).digest("hex").slice(0, 16);
+}
+
+/**
+ * Save an FCM device token for the current user. Capacitor's native
+ * push plugin fires this on app start once it has a fresh token.
+ * Multiple devices coexist via the Hash layout — the same user on
+ * phone-A and phone-B keeps both tokens registered.
+ */
+export async function saveFcmToken(token: unknown): Promise<{ ok: true }> {
+  const userId = await getUserId();
+  const parsed = fcmTokenSchema.safeParse(token);
+  if (!parsed.success) throw new PushError("INVALID_PAYLOAD");
+  const redis = requireRedis();
+  await redis.hset(kvKey.fcmTokens(userId), {
+    [fcmTokenField(parsed.data)]: parsed.data,
+  });
+  return { ok: true };
+}
+
+const removeFcmArgSchema = z
+  .union([fcmTokenSchema, z.undefined()])
+  .optional();
+
+/**
+ * Drop an FCM token. Pass the token to drop only that device; pass
+ * nothing to drop every FCM device for this user. Symmetric with
+ * `removePushSubscription` for the web-push side.
+ */
+export async function removeFcmToken(token?: string): Promise<{ ok: true }> {
+  const userId = await getUserId();
+  const parsed = removeFcmArgSchema.safeParse(token);
+  if (!parsed.success) throw new PushError("INVALID_PAYLOAD");
+  const redis = requireRedis();
+  if (parsed.data) {
+    await redis.hdel(kvKey.fcmTokens(userId), fcmTokenField(parsed.data));
+    return { ok: true };
+  }
+  await redis.del(kvKey.fcmTokens(userId));
+  return { ok: true };
+}
+
 /**
  * Begin (or replace) the push chain for the active pomodoro session.
  *
@@ -154,9 +207,12 @@ export async function startPushChain(
   }
 
   const redis = requireRedis();
-  const subCount = await redis.hlen(kvKey.pushSubscriptions(userId));
-  if (subCount === 0) {
-    // User hasn't subscribed yet — no-op.
+  const [subCount, fcmCount] = await Promise.all([
+    redis.hlen(kvKey.pushSubscriptions(userId)),
+    redis.hlen(kvKey.fcmTokens(userId)),
+  ]);
+  if (subCount === 0 && fcmCount === 0) {
+    // No registered transports for this user — nothing to schedule.
     return { ok: true, scheduled: false };
   }
 

@@ -17,6 +17,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireRedis, kvKey } from "@/lib/kv";
 import { sendWebPush, type PushSubscription } from "@/lib/web-push";
+import { sendFcmPush } from "@/lib/fcm";
 import {
   isQStashConfigured,
   publishWithDelay,
@@ -68,11 +69,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true, skipped: "stale-session" });
   }
 
-  const subs = await redis.hgetall<Record<string, PushSubscription>>(
-    kvKey.pushSubscriptions(userId)
-  );
+  const [subs, fcmTokens] = await Promise.all([
+    redis.hgetall<Record<string, PushSubscription>>(kvKey.pushSubscriptions(userId)),
+    redis.hgetall<Record<string, string>>(kvKey.fcmTokens(userId)),
+  ]);
   const subEntries = subs ? Object.entries(subs) : [];
-  if (subEntries.length === 0) {
+  const fcmEntries = fcmTokens ? Object.entries(fcmTokens) : [];
+  if (subEntries.length === 0 && fcmEntries.length === 0) {
     return NextResponse.json({ ok: true, skipped: "no-subscription" });
   }
 
@@ -96,33 +99,55 @@ export async function POST(request: Request) {
           tag: "tokmato-play",
         };
 
-  // Fan out across every registered device for this user. Failures on
-  // one device should not block delivery to others, so we await all
-  // settles in parallel and prune 410-expired endpoints afterwards.
-  const results = await Promise.all(
+  // Fan out across both transports in parallel. Web Push for browsers/
+  // PWAs (best-effort, Doze-bound on mobile); native FCM for the
+  // Capacitor app (priority:high, escapes Doze). One device per
+  // transport per Hash entry; failures isolated by entry.
+  const webResultsPromise = Promise.all(
     subEntries.map(async ([field, sub]) => ({
       field,
       result: await sendWebPush(sub, payload),
     }))
   );
-  const expiredFields = results
+  const fcmResultsPromise = Promise.all(
+    fcmEntries.map(async ([field, token]) => ({
+      field,
+      result: await sendFcmPush(token, payload),
+    }))
+  );
+  const [webResults, fcmResults] = await Promise.all([
+    webResultsPromise,
+    fcmResultsPromise,
+  ]);
+
+  const expiredWeb = webResults
     .filter((r) => !r.result.ok && r.result.reason === "EXPIRED")
     .map((r) => r.field);
-  if (expiredFields.length > 0) {
-    await redis.hdel(kvKey.pushSubscriptions(userId), ...expiredFields);
-  }
+  const expiredFcm = fcmResults
+    .filter((r) => !r.result.ok && r.result.reason === "EXPIRED")
+    .map((r) => r.field);
+  await Promise.all([
+    expiredWeb.length > 0
+      ? redis.hdel(kvKey.pushSubscriptions(userId), ...expiredWeb)
+      : Promise.resolve(),
+    expiredFcm.length > 0
+      ? redis.hdel(kvKey.fcmTokens(userId), ...expiredFcm)
+      : Promise.resolve(),
+  ]);
   if (process.env.NODE_ENV !== "production") {
-    for (const r of results) {
+    for (const r of [...webResults, ...fcmResults]) {
       if (!r.result.ok && r.result.reason !== "EXPIRED") {
         console.warn("[push/fire] delivery failed", r.field, r.result);
       }
     }
   }
 
-  // Every device for this user expired — drop the chain. The session
-  // marker can stay (TTL clears it); a re-subscribe mid-chain would
-  // need a new chain anyway.
-  if (expiredFields.length === subEntries.length) {
+  // Every transport for this user expired — drop the chain. The
+  // session marker stays (TTL clears it); a re-subscribe mid-chain
+  // would need a new chain anyway.
+  const totalDevices = subEntries.length + fcmEntries.length;
+  const totalExpired = expiredWeb.length + expiredFcm.length;
+  if (totalExpired === totalDevices) {
     await redis.del(kvKey.pushPending(userId));
     return NextResponse.json({ ok: true, dropped: "expired-all" });
   }

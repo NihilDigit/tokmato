@@ -102,6 +102,17 @@ client startSession
 - **Service worker** at `public/sw.js` — only does push handling and notificationclick → focus existing tab. Do NOT add caching strategies here without thinking about how they interact with the Next.js build pipeline.
 - **Platform caveats**: iOS Safari only honors Web Push when tokmato is installed as a PWA (manifest is in place; user has to "add to home screen"). Chrome desktop needs "Continue running background apps" enabled (default on).
 
+### Native FCM transport (v2.3+, `lib/fcm.ts` + `capacitor/`)
+The Capacitor Android wrapper at `capacitor/` packages the same Next.js app into a WebView APK and registers a parallel push transport that bypasses Doze on locked screens, which Web Push cannot.
+
+- **Transports run side by side**: `/api/push/fire` reads BOTH `tokmato:user:{id}:push:subs` (Web Push) and `tokmato:user:{id}:fcm:tokens` (FCM) and fans out in parallel. A boundary alert lands on every browser AND every Capacitor device the user has registered. Chain only stops when every transport for this user has expired.
+- **Capacitor side stores nothing locally beyond a `tokmato:fcm-token` localStorage marker**. The APK loads `https://tokmato.nihildigit.dev` directly (`server.url` mode), so all UI/state lives on the web side — Capacitor only adds the native push plugin and the WebView shell.
+- **`lib/push-client.ts` branches on `window.Capacitor.isNativePlatform()`**: native path calls `Capacitor.Plugins.PushNotifications.register()` and posts the FCM token via `saveFcmToken` server action; web path stays on VAPID + `pushManager.subscribe`. Settings UI uses the same "开启推送" button for both.
+- **`lib/fcm.ts` initializes firebase-admin** from `FIREBASE_SERVICE_ACCOUNT_JSON_B64` (base64-encoded service account JSON in env). Returns DISABLED when missing, EXPIRED when the FCM SDK reports `messaging/registration-token-not-registered`. Calls `getMessaging(app).send()` with `android.priority: "high"` + `notification` block — both required to escape Doze.
+- **APK build pipeline**: `.github/workflows/release-apk.yml` runs on every `v*` tag, builds an arm64-v8a debug APK in `capacitor/android/app/build/outputs/apk/debug/`, and attaches to the GitHub Release if one already exists (else uploads as workflow artifact). Repo secret `ANDROID_GOOGLE_SERVICES_JSON_BASE64` carries the Firebase Android config that the build needs but is gitignored locally. Release-signed APKs (for Play Store) require generating a keystore + adding 3 more secrets and switching to `assembleRelease` — debug-signed is fine for sideload.
+- **Firebase project**: `tokmato-19547`, Android app `dev.nihildigit.tokmato`. Service account email `firebase-adminsdk-fbsvc@tokmato-19547.iam.gserviceaccount.com`.
+- **Doze and high-priority Web Push**: Web Push has no high-priority knob; native FCM does. That's the only architectural reason this Capacitor shell exists. Everything else (UI, auth, sync, store) is the same web codebase. See `capacitor/EXPERIMENT.md` for the migration history and what to do next.
+
 ### Cross-device read-only awareness (v1.6, `app/actions/active-session.ts`)
 A single KV key (`tokmato:user:{id}:active`, 30-min TTL) holds a marker describing the in-progress pomodoro string. Other signed-in devices poll it and render a read-only mirror, naturally blocking double-fire.
 

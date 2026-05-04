@@ -43,6 +43,11 @@ export const kvKey = {
    *  single-key layout (`push:sub`) — one device used to overwrite the
    *  next, so only the latest-subscribed device received notifications. */
   pushSubscriptions: (userId: string) => `tokmato:user:${userId}:push:subs`,
+  /** Native-FCM tokens from the Capacitor Android app, kept as a
+   *  Redis Hash keyed by the truncated sha1 of the token. Parallel to
+   *  pushSubscriptions but feeds the priority:high path that bypasses
+   *  Doze on locked screens. */
+  fcmTokens: (userId: string) => `tokmato:user:${userId}:fcm:tokens`,
   /** Currently-pending QStash messageId for the next phase boundary. */
   pushPending: (userId: string) => `tokmato:user:${userId}:push:pending`,
   /** Cross-device "another device is running a pomodoro" read-only marker.

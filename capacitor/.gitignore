@@ -1,0 +1,47 @@
+# dependencies (bun install)
+node_modules
+
+# output
+out
+dist
+*.tgz
+
+# code coverage
+coverage
+*.lcov
+
+# logs
+logs
+_.log
+report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
+
+# dotenv environment variable files
+.env
+.env.development.local
+.env.test.local
+.env.production.local
+.env.local
+
+# caches
+.eslintcache
+.cache
+*.tsbuildinfo
+
+# IntelliJ based IDEs
+.idea
+
+# Finder (MacOS) folder config
+.DS_Store
+
+# Android build outputs
+android/app/build
+android/.gradle
+android/build
+android/local.properties
+
+# Firebase config — committed only via signed releases (CI injects it
+# from a secret), never from local dev. The Android API key alone is
+# safe to expose, but the service-account JSON is admin-grade — never
+# commit either to keep the policy uniform and easy to remember.
+android/app/google-services.json
+firebase-service-account*.json

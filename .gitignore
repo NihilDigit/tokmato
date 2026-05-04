@@ -34,6 +34,12 @@ yarn-error.log*
 .env*
 !.env.example
 
+# Firebase / FCM credentials — accidentally landed in this repo via a
+# browser download. The Capacitor experiment lives in a sibling repo;
+# nothing in tokmato proper should ever ship Firebase config here.
+google-services.json
+firebase-service-account*.json
+
 # vercel
 .vercel
 
