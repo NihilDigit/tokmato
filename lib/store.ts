@@ -221,6 +221,11 @@ interface StoreActions {
   // Kanban
   moveKanbanCard: (data: { cardId: string; toCol: KanbanColumnId }) => void;
   addKanbanCard: (data: { col: KanbanColumnId; card: KanbanCard }) => void;
+  updateKanbanCard: (data: {
+    cardId: string;
+    patch: Partial<Pick<KanbanCard, "name" | "next">>;
+  }) => void;
+  removeKanbanCard: (cardId: string) => void;
 
   // Wishlist
   addWish: (data: Omit<import("./types").WishlistItem, "id" | "progress">) => void;
@@ -736,6 +741,33 @@ export const useStore = create<Store>()(
           ...normalizeDay(s),
           kanban: { ...s.kanban, [col]: [...s.kanban[col], card] },
         })),
+
+      updateKanbanCard: ({ cardId, patch }) =>
+        set((s) => {
+          const next = { ...s.kanban };
+          (Object.keys(next) as KanbanColumnId[]).forEach((cid) => {
+            next[cid] = next[cid].map((c) => {
+              if (c.id !== cardId) return c;
+              const nextName = patch.name !== undefined ? patch.name.trim() : c.name;
+              if (!nextName) return c;
+              const nextNext =
+                patch.next !== undefined
+                  ? patch.next.trim() || undefined
+                  : c.next;
+              return { ...c, name: nextName, next: nextNext };
+            });
+          });
+          return { kanban: next };
+        }),
+
+      removeKanbanCard: (cardId) =>
+        set((s) => {
+          const next = { ...s.kanban };
+          (Object.keys(next) as KanbanColumnId[]).forEach((cid) => {
+            next[cid] = next[cid].filter((c) => c.id !== cardId);
+          });
+          return { kanban: next };
+        }),
 
       addFoodPreset: ({ name, price }) =>
         set((s) => ({

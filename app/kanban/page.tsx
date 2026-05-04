@@ -3,23 +3,21 @@
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { useStore } from "@/lib/store";
-import { AddKanbanSheet } from "@/components/sheets/AddKanbanSheet";
+import { KanbanCardSheet } from "@/components/sheets/KanbanCardSheet";
+import type { KanbanCard, KanbanColumnId as ColId } from "@/lib/types";
 
 // ─────────────────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────────────────
-type Card = { id: string; name: string; next: string };
-type ColId = "inbox" | "Q1" | "Q2" | "Q3" | "Q4";
 type Col = {
   id: ColId;
-  shortLabel: string; // for mobile tab
+  shortLabel: string;
   label: string;
   sub: string;
-  // Tailwind utility classes pinned to design tokens
-  dot: string; // bg-*
-  text: string; // text-*
-  border: string; // border-*
-  bgSoft: string; // bg-*/[0.x] for active tab
+  dot: string;
+  text: string;
+  border: string;
+  bgSoft: string;
 };
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -83,26 +81,52 @@ const COL_BY_ID: Record<ColId, Col> = COLS.reduce(
   {} as Record<ColId, Col>
 );
 
+// Pointer-drag threshold (px) — beyond this we commit to "drag", under is "tap".
+const DRAG_THRESHOLD = 8;
+
 // ─────────────────────────────────────────────────────────────────────────
 // Page
 // ─────────────────────────────────────────────────────────────────────────
 export default function KanbanPage() {
-  const cards = useStore((s) => s.kanban) as Record<ColId, Card[]>;
+  const cards = useStore((s) => s.kanban) as Record<ColId, KanbanCard[]>;
   const moveCard = useStore((s) => s.moveKanbanCard);
   const addCard = useStore((s) => s.addKanbanCard);
+  const updateCard = useStore((s) => s.updateKanbanCard);
+  const removeCard = useStore((s) => s.removeKanbanCard);
 
-  /** Sheet-based add — opens AddKanbanSheet targeted at `col`. */
-  const [addSheetCol, setAddSheetCol] = useState<ColId | null>(null);
-  const addNew = (col: ColId) => setAddSheetCol(col);
-  const handleAddConfirm = ({ name, next }: { name: string; next: string }) => {
-    if (!addSheetCol) return;
-    const id = `k-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    addCard({ col: addSheetCol, card: { id, name, next: next || undefined } });
+  // Sheet state (single sheet for both add + edit)
+  const [sheet, setSheet] = useState<
+    | { mode: "add"; col: ColId }
+    | { mode: "edit"; col: ColId; card: KanbanCard }
+    | null
+  >(null);
+
+  const openAdd = (col: ColId) => setSheet({ mode: "add", col });
+  const openEdit = (card: KanbanCard, col: ColId) =>
+    setSheet({ mode: "edit", col, card });
+
+  const handleConfirm = ({ name, next }: { name: string; next: string }) => {
+    if (!sheet) return;
+    if (sheet.mode === "add") {
+      const id = `k-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      addCard({ col: sheet.col, card: { id, name, next: next || undefined } });
+    } else {
+      updateCard({ cardId: sheet.card.id, patch: { name, next } });
+    }
   };
 
-  // Desktop drag state (UI-only, not persisted)
-  const [draggedId, setDraggedId] = useState<string | null>(null);
-  const [dragOverColId, setDragOverColId] = useState<ColId | null>(null);
+  const handleDelete = () => {
+    if (!sheet || sheet.mode !== "edit") return;
+    removeCard(sheet.card.id);
+  };
+
+  // Desktop pointer-drag state (works for both mouse and touch)
+  const [drag, setDrag] = useState<{
+    card: KanbanCard;
+    fromCol: ColId;
+    pointer: { x: number; y: number };
+    hoverCol: ColId | null;
+  } | null>(null);
 
   // Mobile state
   const [activeTab, setActiveTab] = useState<ColId>("inbox");
@@ -112,29 +136,42 @@ export default function KanbanPage() {
     anchor: { x: number; y: number };
   } | null>(null);
 
-  // Window-level dragend safety net
-  useEffect(() => {
-    const reset = () => {
-      setDraggedId(null);
-      setDragOverColId(null);
-    };
-    window.addEventListener("dragend", reset);
-    window.addEventListener("drop", reset);
-    return () => {
-      window.removeEventListener("dragend", reset);
-      window.removeEventListener("drop", reset);
-    };
-  }, []);
-
-  const handleUpdate = (cardId: string | null, targetCol: ColId) => {
-    if (!cardId) return;
-    moveCard({ cardId, toCol: targetCol });
+  const hitTestCol = (x: number, y: number): ColId | null => {
+    if (typeof document === "undefined") return null;
+    const el = document.elementFromPoint(x, y);
+    if (!el) return null;
+    const colEl = (el as Element).closest("[data-col-id]") as HTMLElement | null;
+    return (colEl?.dataset.colId as ColId | undefined) ?? null;
   };
 
-  const handleMove = (toCol: ColId) => {
+  const onCardDragStart = (
+    card: KanbanCard,
+    fromCol: ColId,
+    x: number,
+    y: number
+  ) => {
+    setDrag({ card, fromCol, pointer: { x, y }, hoverCol: hitTestCol(x, y) });
+  };
+
+  const onCardDragMove = (x: number, y: number) => {
+    setDrag((prev) =>
+      prev ? { ...prev, pointer: { x, y }, hoverCol: hitTestCol(x, y) } : prev
+    );
+  };
+
+  const onCardDragEnd = (commit: boolean) => {
+    setDrag((prev) => {
+      if (prev && commit && prev.hoverCol && prev.hoverCol !== prev.fromCol) {
+        moveCard({ cardId: prev.card.id, toCol: prev.hoverCol });
+      }
+      return null;
+    });
+  };
+
+  const handleMobileMove = (toCol: ColId) => {
     if (!moveMenu) return;
     if (toCol !== moveMenu.fromCol) {
-      handleUpdate(moveMenu.cardId, toCol);
+      moveCard({ cardId: moveMenu.cardId, toCol });
       // Auto-switch tab on mobile so the user follows the card
       setActiveTab(toCol);
     }
@@ -155,17 +192,17 @@ export default function KanbanPage() {
         <h1 className="serif italic text-h2 leading-tight">任务菜单, 不是债务</h1>
       </header>
 
-      {/* ─── DESKTOP: Inbox row + 2x2 quadrants ─── */}
-      <div className="hidden md:flex md:flex-col md:gap-6">
+      {/* ─── WIDE: Inbox row + 2x2 quadrants ─── */}
+      <div className="hidden wide:flex wide:flex-col wide:gap-6">
         <KanbanCol
           col={inboxCol}
           cards={cards.inbox}
-          draggedId={draggedId}
-          setDraggedId={setDraggedId}
-          dragOverColId={dragOverColId}
-          setDragOverColId={setDragOverColId}
-          onUpdate={handleUpdate}
-          onAdd={addNew}
+          drag={drag}
+          onDragStart={onCardDragStart}
+          onDragMove={onCardDragMove}
+          onDragEnd={onCardDragEnd}
+          onTap={openEdit}
+          onAdd={openAdd}
           horizontal
         />
         <section className="grid grid-cols-2 gap-4">
@@ -174,19 +211,37 @@ export default function KanbanPage() {
               key={col.id}
               col={col}
               cards={cards[col.id]}
-              draggedId={draggedId}
-              setDraggedId={setDraggedId}
-              dragOverColId={dragOverColId}
-              setDragOverColId={setDragOverColId}
-              onUpdate={handleUpdate}
-              onAdd={addNew}
+              drag={drag}
+              onDragStart={onCardDragStart}
+              onDragMove={onCardDragMove}
+              onDragEnd={onCardDragEnd}
+              onTap={openEdit}
+              onAdd={openAdd}
             />
           ))}
         </section>
       </div>
 
-      {/* ─── MOBILE: segmented tabs + single column + long-press radial menu ─── */}
-      <div className="flex flex-col gap-4 md:hidden">
+      {/* Floating drag ghost (desktop only — pointer drag isn't used on mobile) */}
+      {drag && (
+        <div
+          className="pointer-events-none fixed z-[150] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-rule bg-paper px-3 py-2 shadow-lift"
+          style={{ left: drag.pointer.x, top: drag.pointer.y }}
+        >
+          <div className="font-sans text-[13px] font-medium leading-snug text-ink">
+            {drag.card.name}
+          </div>
+          {drag.card.next && (
+            <div className="mt-0.5 text-xs leading-snug text-ink-3">
+              <span className="text-ink-mute">→ </span>
+              {drag.card.next}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ─── NARROW: segmented tabs + single column + long-press radial menu ─── */}
+      <div className="flex flex-col gap-4 wide:hidden">
         {/* Segmented tabs */}
         <div
           role="tablist"
@@ -236,17 +291,18 @@ export default function KanbanPage() {
               onLongPress={(x, y) =>
                 setMoveMenu({ cardId: c.id, fromCol: activeTab, anchor: { x, y } })
               }
+              onTap={() => openEdit(c, activeTab)}
             />
           ))}
           <button
             type="button"
-            onClick={() => addNew(activeTab)}
+            onClick={() => openAdd(activeTab)}
             className="rounded-lg border border-dashed border-rule px-3 py-2.5 text-left text-[12px] text-ink-mute transition hover:border-ink-3/40 hover:text-ink-3"
           >
             + 新任务
           </button>
           <p className="mt-2 text-[11px] leading-relaxed text-ink-mute">
-            长按卡片，上下左右选目标象限
+            轻点编辑, 长按移动象限
           </p>
         </section>
       </div>
@@ -257,67 +313,63 @@ export default function KanbanPage() {
           card={movingCard}
           fromCol={moveMenu.fromCol}
           anchor={moveMenu.anchor}
-          onMove={handleMove}
+          onMove={handleMobileMove}
           onCancel={() => setMoveMenu(null)}
         />
       )}
 
-      {/* Add-card sheet — replaces window.prompt */}
-      <AddKanbanSheet
-        open={addSheetCol !== null}
+      {/* Card sheet — add + edit + delete */}
+      <KanbanCardSheet
+        open={sheet !== null}
         onOpenChange={(open) => {
-          if (!open) setAddSheetCol(null);
+          if (!open) setSheet(null);
         }}
-        col={addSheetCol}
-        onConfirm={handleAddConfirm}
+        col={sheet?.col ?? null}
+        card={sheet?.mode === "edit" ? sheet.card : null}
+        onConfirm={handleConfirm}
+        onDelete={sheet?.mode === "edit" ? handleDelete : undefined}
       />
     </main>
   );
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// KanbanCol — desktop column with drop target + cards stack
+// KanbanCol — desktop column with hit-test target + cards stack
 // ─────────────────────────────────────────────────────────────────────────
 function KanbanCol({
   col,
   cards,
-  draggedId,
-  setDraggedId,
-  dragOverColId,
-  setDragOverColId,
-  onUpdate,
+  drag,
+  onDragStart,
+  onDragMove,
+  onDragEnd,
+  onTap,
   onAdd,
   horizontal = false,
 }: {
   col: Col;
-  cards: Card[];
-  draggedId: string | null;
-  setDraggedId: (id: string | null) => void;
-  dragOverColId: ColId | null;
-  setDragOverColId: (id: ColId | null) => void;
-  onUpdate: (cardId: string | null, targetCol: ColId) => void;
+  cards: KanbanCard[];
+  drag:
+    | {
+        card: KanbanCard;
+        fromCol: ColId;
+        pointer: { x: number; y: number };
+        hoverCol: ColId | null;
+      }
+    | null;
+  onDragStart: (card: KanbanCard, fromCol: ColId, x: number, y: number) => void;
+  onDragMove: (x: number, y: number) => void;
+  onDragEnd: (commit: boolean) => void;
+  onTap: (card: KanbanCard, fromCol: ColId) => void;
   onAdd: (col: ColId) => void;
   horizontal?: boolean;
 }) {
-  const isOver = dragOverColId === col.id;
-  const isDragging = draggedId !== null;
+  const isOver = drag?.hoverCol === col.id && drag.fromCol !== col.id;
+  const isDragging = drag !== null;
 
   return (
     <section
-      onDragOver={(e) => {
-        e.preventDefault();
-        if (dragOverColId !== col.id) setDragOverColId(col.id);
-      }}
-      onDragLeave={(e) => {
-        if (e.currentTarget.contains(e.relatedTarget as Node)) return;
-        if (dragOverColId === col.id) setDragOverColId(null);
-      }}
-      onDrop={(e) => {
-        e.preventDefault();
-        onUpdate(draggedId, col.id);
-        setDraggedId(null);
-        setDragOverColId(null);
-      }}
+      data-col-id={col.id}
       className={cn(
         "rounded-xl border p-5 transition-colors",
         isOver ? cn(col.border, col.bgSoft) : "border-rule bg-paper/60",
@@ -340,9 +392,12 @@ function KanbanCol({
           <DesktopCardItem
             key={c.id}
             card={c}
-            isDragging={draggedId === c.id}
-            onDragStart={() => setDraggedId(c.id)}
-            onDragEnd={() => setDraggedId(null)}
+            fromCol={col.id}
+            isDragging={drag?.card.id === c.id}
+            onDragStart={onDragStart}
+            onDragMove={onDragMove}
+            onDragEnd={onDragEnd}
+            onTap={onTap}
             horizontal={horizontal}
           />
         ))}
@@ -380,29 +435,101 @@ function KanbanCol({
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// DesktopCardItem — HTML5 draggable
+// DesktopCardItem — pointer-event drag (mouse + touch).
+// Tap (no drift past DRAG_THRESHOLD) opens the edit sheet.
 // ─────────────────────────────────────────────────────────────────────────
 function DesktopCardItem({
   card,
+  fromCol,
   isDragging,
   onDragStart,
+  onDragMove,
   onDragEnd,
+  onTap,
   horizontal,
 }: {
-  card: Card;
+  card: KanbanCard;
+  fromCol: ColId;
   isDragging: boolean;
-  onDragStart: (e: React.DragEvent<HTMLDivElement>) => void;
-  onDragEnd: (e: React.DragEvent<HTMLDivElement>) => void;
+  onDragStart: (card: KanbanCard, fromCol: ColId, x: number, y: number) => void;
+  onDragMove: (x: number, y: number) => void;
+  onDragEnd: (commit: boolean) => void;
+  onTap: (card: KanbanCard, fromCol: ColId) => void;
   horizontal: boolean;
 }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const armRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    dragging: boolean;
+  } | null>(null);
+
+  const cleanup = (pointerId: number) => {
+    try {
+      ref.current?.releasePointerCapture(pointerId);
+    } catch {
+      /* already released */
+    }
+    armRef.current = null;
+  };
+
   return (
     <div
-      draggable
-      onDragStart={onDragStart}
-      onDragEnd={onDragEnd}
+      ref={ref}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onTap(card, fromCol);
+        }
+      }}
+      onPointerDown={(e) => {
+        if (e.pointerType === "mouse" && e.button !== 0) return;
+        ref.current?.setPointerCapture(e.pointerId);
+        armRef.current = {
+          pointerId: e.pointerId,
+          startX: e.clientX,
+          startY: e.clientY,
+          dragging: false,
+        };
+      }}
+      onPointerMove={(e) => {
+        const a = armRef.current;
+        if (!a || a.pointerId !== e.pointerId) return;
+        const dx = e.clientX - a.startX;
+        const dy = e.clientY - a.startY;
+        if (!a.dragging) {
+          if (Math.hypot(dx, dy) > DRAG_THRESHOLD) {
+            a.dragging = true;
+            onDragStart(card, fromCol, e.clientX, e.clientY);
+          }
+        } else {
+          onDragMove(e.clientX, e.clientY);
+        }
+      }}
+      onPointerUp={(e) => {
+        const a = armRef.current;
+        if (!a || a.pointerId !== e.pointerId) return;
+        if (a.dragging) {
+          onDragEnd(true);
+        } else {
+          onTap(card, fromCol);
+        }
+        cleanup(e.pointerId);
+      }}
+      onPointerCancel={(e) => {
+        const a = armRef.current;
+        if (!a || a.pointerId !== e.pointerId) return;
+        if (a.dragging) onDragEnd(false);
+        cleanup(e.pointerId);
+      }}
+      style={{ touchAction: "none" }}
       className={cn(
         "select-none rounded-lg border border-rule bg-paper px-3 py-2.5",
         "cursor-grab transition-colors hover:bg-paper-2 active:cursor-grabbing",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/30",
         isDragging && "opacity-40",
         horizontal ? "min-w-[240px] flex-1" : "w-full"
       )}
@@ -419,16 +546,18 @@ function DesktopCardItem({
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// MobileCardItem — long-press triggers move menu (passes anchor coords)
+// MobileCardItem — long-press triggers move menu, short tap opens edit.
 // ─────────────────────────────────────────────────────────────────────────
 const LONG_PRESS_MS = 360;
 
 function MobileCardItem({
   card,
   onLongPress,
+  onTap,
 }: {
-  card: Card;
+  card: KanbanCard;
   onLongPress: (x: number, y: number) => void;
+  onTap: () => void;
 }) {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const startPos = useRef<{ x: number; y: number } | null>(null);
@@ -446,12 +575,18 @@ function MobileCardItem({
     }, LONG_PRESS_MS);
   };
 
-  const cancel = () => {
+  const clearTimer = () => {
     if (timer.current) {
       clearTimeout(timer.current);
       timer.current = null;
     }
+  };
+
+  const settle = (didLift: boolean) => {
+    const wasArmed = !!startPos.current && !fired.current;
+    clearTimer();
     startPos.current = null;
+    if (didLift && wasArmed) onTap();
   };
 
   // Cancel if finger drifts more than 12px before long-press fires
@@ -459,22 +594,34 @@ function MobileCardItem({
     if (!startPos.current || fired.current) return;
     const dx = x - startPos.current.x;
     const dy = y - startPos.current.y;
-    if (Math.hypot(dx, dy) > 12) cancel();
+    if (Math.hypot(dx, dy) > 12) {
+      clearTimer();
+      startPos.current = null;
+    }
   };
 
   return (
     <div
       onPointerDown={(e) => start(e.clientX, e.clientY)}
       onPointerMove={(e) => checkDrift(e.clientX, e.clientY)}
-      onPointerUp={cancel}
-      onPointerCancel={cancel}
-      onPointerLeave={cancel}
+      onPointerUp={() => settle(true)}
+      onPointerCancel={() => settle(false)}
+      onPointerLeave={() => settle(false)}
       onContextMenu={(e) => {
         if (fired.current) e.preventDefault();
       }}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onTap();
+        }
+      }}
       className={cn(
         "select-none rounded-lg border border-rule bg-paper px-3.5 py-3 touch-none",
-        "transition active:scale-[0.99] active:bg-paper-2"
+        "transition active:scale-[0.99] active:bg-paper-2",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/30"
       )}
     >
       <div className="font-sans text-[14px] font-medium leading-snug text-ink">{card.name}</div>
@@ -519,7 +666,7 @@ function RadialMoveMenu({
   onMove,
   onCancel,
 }: {
-  card: Card;
+  card: KanbanCard;
   fromCol: ColId;
   anchor: { x: number; y: number };
   onMove: (toCol: ColId) => void;

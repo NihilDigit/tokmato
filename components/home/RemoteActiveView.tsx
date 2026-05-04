@@ -69,7 +69,7 @@ export function RemoteActiveView({ marker }: { marker: ActiveSessionMarker }) {
 
   return (
     <main className="flex flex-col gap-6">
-      <section className="grid grid-cols-1 items-center gap-8 md:grid-cols-2 md:gap-12">
+      <section className="grid grid-cols-1 items-center gap-8 wide:grid-cols-2 wide:gap-12">
         {/* Left: muted tomato + countdown */}
         <div className="flex flex-col items-center gap-4 text-center opacity-80">
           <div className="relative" style={{ width: "min(280px, 60vw)", aspectRatio: "1" }}>

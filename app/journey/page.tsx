@@ -145,8 +145,8 @@ export default function JourneyPage() {
         </h1>
       </header>
 
-      {/* 5 stats — hairline-divided. 2 cols mobile, 5 cols ≥ md */}
-      <section className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-rule bg-rule md:grid-cols-5">
+      {/* 5 stats — hairline-divided. 2 cols mobile, 5 cols on wide */}
+      <section className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-rule bg-rule wide:grid-cols-5">
         <BalanceCell kicker="番茄" value={stats.totalPomos.toLocaleString()} />
         <BalanceCell kicker="学习" value={stats.totalHours.toFixed(1)} unit="h" />
         <BalanceCell
@@ -206,7 +206,7 @@ export default function JourneyPage() {
           })}
         </div>
 
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 wide:grid-cols-2">
           {/* Left: heatmap (tone follows the active filter) */}
           <div className="rounded-xl border border-rule bg-paper p-5">
             <Heatmap toneClass={heatmapToneClass} counts={heatmapCounts} />

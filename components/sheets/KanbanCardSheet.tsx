@@ -1,21 +1,20 @@
 "use client";
 
 /**
- * AddKanbanSheet — replace the legacy `window.prompt` with a
- * ResponsiveSheet so adding a card matches the rest of the app.
+ * KanbanCardSheet — unified add/edit form for a kanban card.
  *
  * Two fields:
- *   - 任务  (required)   — short identifier
+ *   - 任务   (required)  — short identifier
  *   - 下一步 (optional)  — concrete first action ("→ ...")
  *
- * Confirms on Enter inside the task input. The target column is
- * passed in by the parent so the sheet can echo "添加到 Q1" etc.
+ * Edit mode (when `card` is provided) shows a 删除 button on the left;
+ * the first click arms it (二次点确认)，避免误触。
  */
 
 import { useEffect, useRef, useState } from "react";
 import { ResponsiveSheet } from "@/components/ui/responsive-sheet";
 import { cn } from "@/lib/utils";
-import type { KanbanColumnId } from "@/lib/types";
+import type { KanbanCard, KanbanColumnId } from "@/lib/types";
 
 const COL_LABEL: Record<KanbanColumnId, string> = {
   inbox: "Inbox",
@@ -33,37 +32,57 @@ const COL_ACCENT: Record<KanbanColumnId, string> = {
   Q4: "text-gold",
 };
 
-export interface AddKanbanSheetProps {
+export interface KanbanCardSheetProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** Column the new card will land in. Renders as a kicker in the title. */
+  /** Column the card lives in (used for the title kicker). */
   col: KanbanColumnId | null;
+  /** When set, the sheet is in edit mode. */
+  card?: KanbanCard | null;
   onConfirm: (data: { name: string; next: string }) => void;
+  /** Only called in edit mode. */
+  onDelete?: () => void;
 }
 
-export function AddKanbanSheet({
+export function KanbanCardSheet({
   open,
   onOpenChange,
   col,
+  card,
   onConfirm,
-}: AddKanbanSheetProps) {
+  onDelete,
+}: KanbanCardSheetProps) {
+  const isEdit = !!card;
+
   const [name, setName] = useState("");
   const [next, setNext] = useState("");
+  const [armDelete, setArmDelete] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (!open) return;
-    setName("");
-    setNext("");
+    setName(card?.name ?? "");
+    setNext(card?.next ?? "");
+    setArmDelete(false);
     const id = window.setTimeout(() => inputRef.current?.focus(), 60);
     return () => window.clearTimeout(id);
-  }, [open]);
+  }, [open, card]);
 
   const valid = name.trim().length > 0;
 
   const handleConfirm = () => {
     if (!valid) return;
     onConfirm({ name: name.trim(), next: next.trim() });
+    onOpenChange(false);
+  };
+
+  const handleDelete = () => {
+    if (!onDelete) return;
+    if (!armDelete) {
+      setArmDelete(true);
+      return;
+    }
+    onDelete();
     onOpenChange(false);
   };
 
@@ -76,7 +95,10 @@ export function AddKanbanSheet({
       onOpenChange={onOpenChange}
       title={
         <>
-          新任务 <span className={cn("not-italic font-mono text-base", accent)}>· {label}</span>
+          {isEdit ? "编辑任务" : "新任务"}{" "}
+          <span className={cn("not-italic font-mono text-base", accent)}>
+            · {label}
+          </span>
         </>
       }
     >
@@ -122,25 +144,44 @@ export function AddKanbanSheet({
           />
         </div>
 
-        <div className="flex items-center justify-end gap-3 pt-1">
-          <button
-            type="button"
-            onClick={() => onOpenChange(false)}
-            className="text-sm text-ink-3 hover:text-ink"
-          >
-            取消
-          </button>
-          <button
-            type="submit"
-            disabled={!valid}
-            className={cn(
-              "inline-flex min-h-11 items-center gap-2 rounded-full bg-ink px-5 py-2.5 text-sm font-medium text-paper",
-              "shadow-soft transition hover:bg-ink-2",
-              "disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-ink"
-            )}
-          >
-            添加
-          </button>
+        <div className="flex items-center justify-between gap-3 pt-1">
+          {isEdit && onDelete ? (
+            <button
+              type="button"
+              onClick={handleDelete}
+              className={cn(
+                "min-h-11 rounded-full px-4 py-2 text-sm font-medium transition",
+                armDelete
+                  ? "bg-tomato text-paper hover:bg-tomato/90"
+                  : "text-ink-3 hover:text-tomato"
+              )}
+            >
+              {armDelete ? "再点一次确认" : "删除"}
+            </button>
+          ) : (
+            <span aria-hidden />
+          )}
+
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => onOpenChange(false)}
+              className="text-sm text-ink-3 hover:text-ink"
+            >
+              取消
+            </button>
+            <button
+              type="submit"
+              disabled={!valid}
+              className={cn(
+                "inline-flex min-h-11 items-center gap-2 rounded-full bg-ink px-5 py-2.5 text-sm font-medium text-paper",
+                "shadow-soft transition hover:bg-ink-2",
+                "disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-ink"
+              )}
+            >
+              {isEdit ? "保存" : "添加"}
+            </button>
+          </div>
         </div>
       </form>
     </ResponsiveSheet>

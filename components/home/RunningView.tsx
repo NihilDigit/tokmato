@@ -250,8 +250,8 @@ export function RunningView({ session, onEnd }: RunningViewProps) {
         />
       )}
 
-      {/* Two-column layout (single column on small screens) */}
-      <section className="grid grid-cols-1 items-center gap-8 md:grid-cols-2 md:gap-12">
+      {/* Two-column layout (single column on narrow screens) */}
+      <section className="grid grid-cols-1 items-center gap-8 wide:grid-cols-2 wide:gap-12">
         {/* Left: tomato + countdown */}
         <div className="flex flex-col items-center gap-4 text-center">
           <div className="relative" style={{ width: "min(280px, 60vw)", aspectRatio: "1" }}>

@@ -65,7 +65,7 @@ export default function RedeemPage() {
       <section className="rounded-xl border border-rule bg-paper-2/50 p-6 sm:p-8">
         <h1 className="serif italic text-h2 leading-tight">兑现</h1>
 
-        <div className="mt-6 grid grid-cols-1 items-stretch gap-6 md:grid-cols-[1fr_auto]">
+        <div className="mt-6 grid grid-cols-1 items-stretch gap-6 wide:grid-cols-[1fr_auto]">
           {/* Left: F + H balance + ¥ total */}
           <div className="flex flex-col gap-4">
             <div className="grid grid-cols-2 overflow-hidden rounded-lg border border-rule bg-paper">
@@ -129,7 +129,7 @@ export default function RedeemPage() {
         <div className="flex items-baseline justify-between">
           <h2 className="serif italic text-h3 leading-tight">清单</h2>
         </div>
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 wide:grid-cols-2">
           {wishlist.map((w) => (
             <WishCard
               key={w.id}

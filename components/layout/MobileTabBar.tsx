@@ -27,7 +27,7 @@ export function MobileTabBar() {
       aria-label="底部导航"
       className={cn(
         "mobile-tabbar",
-        "fixed bottom-0 inset-x-0 z-90 md:hidden",
+        "fixed bottom-0 inset-x-0 z-90 wide:hidden",
         "h-[calc(64px+env(safe-area-inset-bottom))] pb-[env(safe-area-inset-bottom)]",
         "bg-paper/92 backdrop-blur-xl backdrop-saturate-150 border-t border-rule",
         "grid grid-cols-5",

@@ -4,6 +4,13 @@
 /* Dark mode applies to both shadcn convention (.dark) and our convention ([data-theme="dark"]). */
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *, .dark, .dark *));
 
+/* "wide" — desktop UI mode. We require BOTH width and height thresholds so a
+   landscape phone (e.g. 932×430) drops back to the mobile UI even though it's
+   wider than 768. The inverse case (either dimension below threshold) keeps
+   the mobile tab bar + single-column layouts. The same query lives mirrored
+   in the .desktop-only-nav rule below. */
+@custom-variant wide (@media (min-width: 768px) and (min-height: 600px));
+
 /* ─────────────────────────────────────────────────────────────────────────
    tokmato design tokens — migrated from legacy/styles.css
    See legacy/TOKEN_MAP.md for the legacy → Tailwind utility cheatsheet.
@@ -478,8 +485,9 @@ button {
   }
 }
 
-/* Mobile breakpoint helpers */
-@media (max-width: 768px) {
+/* Mobile breakpoint helpers — inverse of the wide variant above. Either
+   too narrow OR too short collapses to mobile UI. */
+@media (max-width: 767px), (max-height: 599px) {
   .page-shell {
     padding-bottom: calc(var(--mobile-nav-h) + var(--safe-b) + 24px);
   }
