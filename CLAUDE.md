@@ -39,8 +39,8 @@ Production deploys are triggered by pushing a `v*` tag — `.github/workflows/re
 
 Manual, semantic. Auto-generated commit lists are flow-of-thought; semantic notes are the part of version history future-you actually re-reads.
 
-- **When**: after the v* tag has been pushed AND the `Release Deploy` workflow has gone green AND `tokmato.nihildigit.dev` is verified live.
-- **Skip a tag**: if a tag never deployed (e.g. v1.6 was killed by a prerender bug), don't write a release for it. The follow-up patch (v1.6.1) carries the notes for both.
+- **Where the body lives**: in the **annotated tag's message**. `release-apk.yml` reads `git tag --format='%(contents:body)'` at CI time and uses that as the GitHub Release body when it auto-publishes the release with the APK attached. Write the body once, at `git tag -a` time, and you're done.
+- **Skip a tag**: if a tag never deployed (e.g. v1.6 was killed by a prerender bug), the auto-publish step in CI will fail along with everything else and no release gets created. The follow-up patch (v1.6.1) carries the consolidated notes for both.
 - **Structure**: three sections, each on demand.
   - **主要变化** — user-perceivable functional changes and system-level shifts. Each entry includes the design rationale (why this, not that), at the depth of README's "为何不用现有番茄钟 / 代币经济学" sections.
   - **修复** — bug fixes, naming the affected path and who would hit it.
@@ -48,13 +48,20 @@ Manual, semantic. Auto-generated commit lists are flow-of-thought; semantic note
 - **Style**: same Chinese tech writing discipline as README; the AI-tells blacklist in the global `~/.claude/CLAUDE.md` "文档撰写风格" section applies. Don't write "What's Changed" or commit lists.
 - **Command**:
   ```bash
-  $EDITOR /tmp/tokmato-release-vX.Y.Z.md   # write the body
-  gh -R NihilDigit/tokmato release create vX.Y.Z \
-    --title "vX.Y.Z" \
-    --notes-file /tmp/tokmato-release-vX.Y.Z.md \
-    --latest --verify-tag
+  git tag -a v2.X -m "$(cat <<'EOF'
+  v2.X — one-line subject
+
+  ## 主要变化
+  ...
+
+  ## 工程
+  ...
+  EOF
+  )"
+  git push origin main v2.X
   ```
-- `--verify-tag` refuses to attach to a non-existent tag; `--latest` matters when a patch supersedes a same-major minor.
+  CI watches the tag push, builds APK, auto-publishes the GitHub Release with the tag body as the release notes and the arm64-v8a APK attached.
+- **Manual override**: if a release already exists for the tag at CI time (rare, for hand-authored notes), the workflow just `gh release upload --clobber` the APK onto it instead of recreating.
 
 ## Architecture
 
