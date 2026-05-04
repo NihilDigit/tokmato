@@ -27,10 +27,33 @@ android {
             universalApk false
         }
     }
+    // Release signing pulls everything from env so the keystore never
+    // sits in the repo. CI decodes ANDROID_KEYSTORE_BASE64 to a tmp
+    // file and exports the path; local dev sources
+    // ~/.local/share/tokmato-android/credentials.env first.
+    signingConfigs {
+        release {
+            def ksPath = System.getenv("ANDROID_KEYSTORE_PATH")
+            if (ksPath) {
+                storeFile file(ksPath)
+                storePassword System.getenv("ANDROID_KEYSTORE_PASSWORD") ?: ""
+                keyAlias System.getenv("ANDROID_KEY_ALIAS") ?: "tokmato"
+                keyPassword System.getenv("ANDROID_KEY_PASSWORD") ?: ""
+            }
+        }
+    }
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            // Only attach the signing config when the env exposes a
+            // keystore path; otherwise leave unsigned so a developer
+            // running `gradlew assembleRelease` without secrets gets
+            // a clear "missing keystore" failure rather than a build
+            // signed with the AGP debug key.
+            if (System.getenv("ANDROID_KEYSTORE_PATH")) {
+                signingConfig signingConfigs.release
+            }
         }
     }
 }
