@@ -10,6 +10,8 @@
 import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { useActiveSession } from "@/lib/use-active-session";
+import { cancelPushChain } from "@/app/actions/push";
+import { clearActiveSession } from "@/app/actions/active-session";
 import { cn } from "@/lib/utils";
 
 const POMO_MS = 25 * 60 * 1000;
@@ -23,9 +25,10 @@ function fmtMmSs(ms: number): string {
 }
 
 export function RemoteActiveBanner() {
-  const { remoteActive } = useActiveSession();
+  const { remoteActive, clearRemoteActive } = useActiveSession();
   const pathname = usePathname();
   const [now, setNow] = useState(() => Date.now());
+  const [ending, setEnding] = useState(false);
 
   // Tick only while we're rendering. The hook above already handles
   // poll/visibility; we just need a clock for the displayed countdown.
@@ -70,6 +73,22 @@ export function RemoteActiveBanner() {
       <span className="ml-auto truncate text-sm text-ink-2">
         {remoteActive.task}
       </span>
+      <button
+        type="button"
+        disabled={ending}
+        onClick={() => {
+          setEnding(true);
+          void Promise.allSettled([
+            cancelPushChain("pomodoro"),
+            clearActiveSession(),
+          ]).then(() => {
+            clearRemoteActive();
+          });
+        }}
+        className="shrink-0 rounded-full border border-rule px-3 py-1 text-[12px] text-ink-3 transition hover:border-tomato/40 hover:text-tomato disabled:opacity-50"
+      >
+        {ending ? "结束中" : "结束"}
+      </button>
     </div>
   );
 }

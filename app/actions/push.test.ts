@@ -30,12 +30,14 @@ describeIf("push server actions (real Redis + QStash)", async () => {
   const SUBS_KEY = `tokmato:user:${TEST_USER_ID}:push:subs`;
   const LEGACY_SUB_KEY = `tokmato:user:${TEST_USER_ID}:push:sub`;
   const PENDING_KEY = `tokmato:user:${TEST_USER_ID}:push:pending`;
+  const PLAY_PENDING_KEY = `tokmato:user:${TEST_USER_ID}:push:pending:play`;
 
   async function cleanup() {
     if (!redis) return;
     await redis.del(SUBS_KEY);
     await redis.del(LEGACY_SUB_KEY);
     await redis.del(PENDING_KEY);
+    await redis.del(PLAY_PENDING_KEY);
   }
 
   beforeEach(async () => {
@@ -134,6 +136,42 @@ describeIf("push server actions (real Redis + QStash)", async () => {
       const after = await redis!.get(PENDING_KEY);
       expect(after).toBeNull();
     }, 15_000);
+
+    it("keeps play-end pending separate from the pomodoro chain", async () => {
+      await savePushSubscription({
+        endpoint: "https://updates.push.services.mozilla.com/wpush/v1/parallel",
+        keys: { p256dh: "BX-parallel", auth: "parallel-auth" },
+      });
+
+      await startPushChain({
+        sessionId: "pomo-session",
+        boundaryAt: Date.now() + 120_000,
+        kind: "running-end",
+        count: 1,
+      });
+      await startPushChain({
+        sessionId: "play-session",
+        boundaryAt: Date.now() + 120_000,
+        kind: "play-end",
+        count: 1,
+      });
+
+      const pomo = await redis!.get<{ messageId: string; sessionId: string }>(
+        PENDING_KEY
+      );
+      const play = await redis!.get<{ messageId: string; sessionId: string }>(
+        PLAY_PENDING_KEY
+      );
+      expect(pomo?.sessionId).toBe("pomo-session");
+      expect(play?.sessionId).toBe("play-session");
+
+      await cancelPushChain("pomodoro");
+      expect(await redis!.get(PENDING_KEY)).toBeNull();
+      expect(await redis!.get(PLAY_PENDING_KEY)).not.toBeNull();
+
+      await cancelPushChain("play");
+      expect(await redis!.get(PLAY_PENDING_KEY)).toBeNull();
+    }, 20_000);
 
     it("startPushChain rotates pending.sessionId when called twice — old chain is invalidated", async () => {
       await savePushSubscription({

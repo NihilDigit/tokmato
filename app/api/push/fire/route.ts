@@ -59,11 +59,13 @@ export async function POST(request: Request) {
   const { userId, sessionId, kind, count } = parsed.data;
 
   const redis = requireRedis();
+  const pendingKey =
+    kind === "play-end" ? kvKey.playPushPending(userId) : kvKey.pushPending(userId);
 
   // Cancellation check — if the client has called cancelPushChain, or
   // started a new session, push:pending will not match this sessionId.
   const pending = await redis.get<{ messageId: string; sessionId: string }>(
-    kvKey.pushPending(userId)
+    pendingKey
   );
   if (!pending || pending.sessionId !== sessionId) {
     return NextResponse.json({ ok: true, skipped: "stale-session" });
@@ -148,7 +150,7 @@ export async function POST(request: Request) {
   const totalDevices = subEntries.length + fcmEntries.length;
   const totalExpired = expiredWeb.length + expiredFcm.length;
   if (totalExpired === totalDevices) {
-    await redis.del(kvKey.pushPending(userId));
+    await redis.del(pendingKey);
     return NextResponse.json({ ok: true, dropped: "expired-all" });
   }
 
@@ -156,7 +158,7 @@ export async function POST(request: Request) {
   // to advance (play does not use the cross-device marker), and no
   // next link to schedule.
   if (kind === "play-end") {
-    await redis.del(kvKey.pushPending(userId));
+    await redis.del(pendingKey);
     return NextResponse.json({ ok: true, kind: "play-end" });
   }
 
@@ -192,7 +194,7 @@ export async function POST(request: Request) {
       console.warn("[push/fire] chain schedule failed", e);
     }
     // Drop pending so the client knows the chain has stopped.
-    await redis.del(kvKey.pushPending(userId));
+    await redis.del(pendingKey);
   }
 
   return NextResponse.json({ ok: true });

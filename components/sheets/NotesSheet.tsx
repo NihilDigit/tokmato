@@ -115,7 +115,6 @@ export function NotesSheet({
       action: actions[i] ?? "inbox",
     }));
     onConfirm(assignments);
-    onOpenChange(false);
   };
 
   const setAction = (i: number, a: Action) =>

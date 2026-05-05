@@ -87,26 +87,18 @@ export default function JourneyPage() {
     totalH: recentTokens.reduce((sum, r) => sum + Math.max(0, r.hDelta), 0),
   };
 
-  // Per-day positive-delta sums for the trend chart. Matches the
-  // earned-only framing of totalF / totalH above so the line peaks
-  // correspond visibly to the totals shown in the stats row.
-  const dailyEarned = useMemo(() => {
-    const f = new Map<string, number>();
-    const h = new Map<string, number>();
-    for (const e of recentTokens) {
-      if (e.fDelta > 0) f.set(e.dayKey, (f.get(e.dayKey) ?? 0) + e.fDelta);
-      if (e.hDelta > 0) h.set(e.dayKey, (h.get(e.dayKey) ?? 0) + e.hDelta);
-    }
-    return {
-      f: last30Keys.map((k) => f.get(k) ?? 0),
-      h: last30Keys.map((k) => h.get(k) ?? 0),
-    };
-  }, [recentTokens, last30Keys]);
+  // Trend chart = daily closing balances, not daily income. A line chart
+  // should show a state over time; tokenHistory deltas are folded into
+  // closing F/H balances, then the Redeem-page money value is derived.
+  const balanceTrend = useMemo(
+    () => buildBalanceTrend(tokenHistory, last30Keys),
+    [tokenHistory, last30Keys],
+  );
 
-  const distribution: { tag: TagConfig; pct: number }[] = useMemo(() => {
+  const distribution: { tag: TagConfig; count: number; pct: number }[] = useMemo(() => {
     const total = recentRecordsAll.reduce((sum, r) => sum + r.count, 0);
     if (total <= 0) {
-      return tags.map((t) => ({ tag: t, pct: 0 }));
+      return tags.map((t) => ({ tag: t, count: 0, pct: 0 }));
     }
     const counts: Record<string, number> = recentRecordsAll.reduce(
       (acc: Record<string, number>, r) => {
@@ -117,7 +109,8 @@ export default function JourneyPage() {
     );
     return tags.map((t) => ({
       tag: t,
-      pct: Math.round(((counts[t.id] ?? 0) / total) * 100),
+      count: counts[t.id] ?? 0,
+      pct: ((counts[t.id] ?? 0) / total) * 100,
     }));
   }, [recentRecordsAll, tags]);
 
@@ -142,7 +135,7 @@ export default function JourneyPage() {
   }, [activeTag, tagById]);
 
   const recentStrings = recentRecords.slice(0, 20).map((record) => ({
-    task: record.task,
+    task: record.result || record.task,
     tag: tagById.get(record.tag),
     tagRaw: record.tag,
     count: record.count,
@@ -178,7 +171,11 @@ export default function JourneyPage() {
         />
       </section>
 
-      <TrendSection fSeries={dailyEarned.f} hSeries={dailyEarned.h} />
+      <TrendSection
+        fSeries={balanceTrend.f}
+        hSeries={balanceTrend.h}
+        yuanSeries={balanceTrend.yuan}
+      />
 
       {/* Heatmap (left 50%) + Donut (right 50%) — single visual section */}
       <section className="flex flex-col gap-4">
@@ -251,7 +248,7 @@ export default function JourneyPage() {
                   />
                   <span className="mono text-xs text-ink-3">{d.tag.label}</span>
                   <span className="serif text-base leading-none text-ink">
-                    {d.pct}
+                    {formatPct(d.pct)}
                     <span className="ml-0.5 text-[11px] text-ink-3">%</span>
                   </span>
                 </li>
@@ -508,6 +505,52 @@ function formatRecordTime(time: number) {
   return `${label} ${hh}:${mm}`;
 }
 
+function formatPct(pct: number) {
+  if (pct <= 0) return "0";
+  if (pct >= 99.5) return "100";
+  return pct >= 10 ? pct.toFixed(0) : pct.toFixed(1);
+}
+
+function round1(n: number) {
+  return Math.round(n * 10) / 10;
+}
+
+function buildBalanceTrend(entries: TokenLedgerEntry[], dayKeys: string[]) {
+  let f = 0;
+  let h = 0;
+  const byDay = new Map<string, TokenLedgerEntry[]>();
+  const firstDay = dayKeys[0];
+
+  for (const entry of entries) {
+    if (firstDay && entry.dayKey < firstDay) {
+      f += entry.fDelta;
+      h += entry.hDelta;
+      continue;
+    }
+    const bucket = byDay.get(entry.dayKey) ?? [];
+    bucket.push(entry);
+    byDay.set(entry.dayKey, bucket);
+  }
+
+  const fSeries: number[] = [];
+  const hSeries: number[] = [];
+  const yuanSeries: number[] = [];
+
+  for (const dayKey of dayKeys) {
+    for (const entry of byDay.get(dayKey) ?? []) {
+      f += entry.fDelta;
+      h += entry.hDelta;
+    }
+    const fBalance = Math.max(0, round1(f));
+    const hBalance = Math.max(0, round1(h));
+    fSeries.push(fBalance);
+    hSeries.push(hBalance);
+    yuanSeries.push(round1(fBalance * 5 + hBalance * 10));
+  }
+
+  return { f: fSeries, h: hSeries, yuan: yuanSeries };
+}
+
 function exportJourneyJson(records: unknown[]) {
   const blob = new Blob([JSON.stringify(records, null, 2)], {
     type: "application/json",
@@ -522,25 +565,28 @@ function exportJourneyJson(records: unknown[]) {
   URL.revokeObjectURL(url);
 }
 
-// Trend — F / H per-day earned. 7d / 30d toggle.
+// Trend — daily closing balances. 7d / 30d toggle.
 // Series come pre-sliced as the full 30-day arrays (oldest → today);
 // this component just tail-slices to 7 when needed.
 function TrendSection({
   fSeries,
   hSeries,
+  yuanSeries,
 }: {
   fSeries: number[];
   hSeries: number[];
+  yuanSeries: number[];
 }) {
   const [range, setRange] = useState<7 | 30>(30);
   const f = range === 7 ? fSeries.slice(-7) : fSeries;
   const h = range === 7 ? hSeries.slice(-7) : hSeries;
+  const yuan = range === 7 ? yuanSeries.slice(-7) : yuanSeries;
 
   return (
     <section className="flex flex-col gap-4">
       <SectionHead
-        kicker="F · H"
-        title="走势"
+        kicker="F · H · ¥"
+        title="余额"
         right={
           <div className="inline-flex gap-1.5">
             {[7, 30].map((n) => {
@@ -566,7 +612,7 @@ function TrendSection({
       />
 
       <div className="rounded-xl border border-rule bg-paper p-5">
-        <TrendChart fSeries={f} hSeries={h} />
+        <TrendChart fSeries={f} hSeries={h} yuanSeries={yuan} />
         <div className="mono mt-3.5 flex items-center justify-between text-[11px] text-ink-mute">
           <span>{range} 天前</span>
           <div className="flex items-center gap-3">
@@ -575,6 +621,9 @@ function TrendSection({
             </span>
             <span className="inline-flex items-center gap-1.5">
               <span className="h-2 w-2 rounded-full bg-sage" aria-hidden />H
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="h-2 w-2 rounded-full bg-teal" aria-hidden />¥
             </span>
           </div>
           <span>今天</span>
@@ -587,46 +636,54 @@ function TrendSection({
 function TrendChart({
   fSeries,
   hSeries,
+  yuanSeries,
 }: {
   fSeries: number[];
   hSeries: number[];
+  yuanSeries: number[];
 }) {
-  const N = fSeries.length;
+  const N = Math.max(fSeries.length, hSeries.length, yuanSeries.length, 1);
+  const fValues = normalizeSeries(fSeries, N);
+  const hValues = normalizeSeries(hSeries, N);
+  const yuanValues = normalizeSeries(yuanSeries, N);
   const W = 600;
   const H = 160;
-  const pad = { l: 32, r: 12, t: 14, b: 10 };
+  const pad = { l: 32, r: 42, t: 14, b: 10 };
   const iw = W - pad.l - pad.r;
   const ih = H - pad.t - pad.b;
-  const max = Math.max(1, ...fSeries, ...hSeries);
+  const tokenMax = Math.max(0, ...fValues, ...hValues);
+  const yuanMax = Math.max(0, ...yuanValues);
+  const noData = tokenMax <= 0 && yuanMax <= 0;
+  const max = Math.max(1, tokenMax);
+  const moneyMax = Math.max(1, yuanMax);
   // Round max up to a "nice" tick so the y-axis label reads as a clean
   // integer rather than a noisy actual maximum.
-  const niceMax = (() => {
-    if (max <= 5) return 5;
-    if (max <= 10) return 10;
-    const pow = Math.pow(10, Math.floor(Math.log10(max)));
-    return Math.ceil(max / pow) * pow;
-  })();
+  const niceMax = niceCeil(max);
+  const niceMoneyMax = niceCeil(moneyMax);
 
   const xAt = (i: number) =>
     pad.l + (N <= 1 ? iw / 2 : (i / (N - 1)) * iw);
   const yAt = (v: number) => pad.t + (1 - v / niceMax) * ih;
+  const yMoneyAt = (v: number) => pad.t + (1 - v / niceMoneyMax) * ih;
 
-  const buildPath = (series: number[]) =>
+  const buildPath = (series: number[], yScale: (v: number) => number) =>
     series
-      .map((v, i) => `${i === 0 ? "M" : "L"} ${xAt(i)} ${yAt(v)}`)
+      .map((v, i) => `${i === 0 ? "M" : "L"} ${xAt(i)} ${yScale(v)}`)
       .join(" ");
   const buildArea = (series: number[]) => {
     const last = series.length - 1;
-    return `${buildPath(series)} L ${xAt(last)} ${yAt(0)} L ${xAt(0)} ${yAt(0)} Z`;
+    return `${buildPath(series, yAt)} L ${xAt(last)} ${yAt(0)} L ${xAt(0)} ${yAt(0)} Z`;
   };
 
-  const fPath = buildPath(fSeries);
-  const hPath = buildPath(hSeries);
-  const fArea = buildArea(fSeries);
-  const hArea = buildArea(hSeries);
+  const fPath = buildPath(fValues, yAt);
+  const hPath = buildPath(hValues, yAt);
+  const yuanPath = buildPath(yuanValues, yMoneyAt);
+  const fArea = buildArea(fValues);
+  const hArea = buildArea(hValues);
 
-  const total = (s: number[]) => s.reduce((a, b) => a + b, 0);
-  const ariaLabel = `走势：F 累计 ${total(fSeries)}，H 累计 ${total(hSeries)}，最高单日 ${max}`;
+  const ariaLabel = noData
+    ? "余额：暂无 F / H"
+    : `余额：当前 F ${fValues.at(-1) ?? 0}，H ${hValues.at(-1) ?? 0}，共可花 ¥${yuanValues.at(-1) ?? 0}`;
 
   // 7d view shows dots (each day matters); 30d view drops them so the
   // line itself is the signal and dots don't crowd into noise.
@@ -684,60 +741,121 @@ function TrendChart({
       >
         {niceMax}
       </text>
+      <text
+        x={W - pad.r + 6}
+        y={yMoneyAt(niceMoneyMax)}
+        dy="0.32em"
+        textAnchor="start"
+        fontSize="10"
+        fill="var(--ink-mute)"
+        fontFamily="var(--font-mono, ui-monospace)"
+      >
+        ¥{niceMoneyMax}
+      </text>
 
-      {/* areas — drawn first so lines sit on top */}
-      <path d={hArea} fill="var(--sage)" opacity={0.1} />
-      <path d={fArea} fill="var(--tomato)" opacity={0.1} />
-
-      {/* lines */}
-      <path
-        d={hPath}
-        stroke="var(--sage)"
-        strokeWidth={1.6}
-        fill="none"
-        strokeLinejoin="round"
-        strokeLinecap="round"
-        vectorEffect="non-scaling-stroke"
-      />
-      <path
-        d={fPath}
-        stroke="var(--tomato)"
-        strokeWidth={1.6}
-        fill="none"
-        strokeLinejoin="round"
-        strokeLinecap="round"
-        vectorEffect="non-scaling-stroke"
-      />
-
-      {/* dots — only on 7d view */}
-      {showDots && (
+      {noData ? (
+        <text
+          x={pad.l + iw / 2}
+          y={pad.t + ih / 2}
+          textAnchor="middle"
+          dominantBaseline="middle"
+          fontSize="13"
+          fill="var(--ink-mute)"
+          fontFamily="var(--font-sans, ui-sans-serif)"
+        >
+          暂无 F / H 余额
+        </text>
+      ) : (
         <>
-          {hSeries.map((v, i) => (
-            <circle
-              key={`h-${i}`}
-              cx={xAt(i)}
-              cy={yAt(v)}
-              r={dotR}
-              fill="var(--sage)"
-            >
-              <title>{`${N - 1 - i} 天前 · H ${v}`}</title>
-            </circle>
-          ))}
-          {fSeries.map((v, i) => (
-            <circle
-              key={`f-${i}`}
-              cx={xAt(i)}
-              cy={yAt(v)}
-              r={dotR}
-              fill="var(--tomato)"
-            >
-              <title>{`${N - 1 - i} 天前 · F ${v}`}</title>
-            </circle>
-          ))}
+          {/* areas — drawn first so lines sit on top */}
+          <path d={hArea} fill="var(--sage)" opacity={0.1} />
+          <path d={fArea} fill="var(--tomato)" opacity={0.1} />
+
+          {/* lines */}
+          <path
+            d={hPath}
+            stroke="var(--sage)"
+            strokeWidth={1.6}
+            fill="none"
+            strokeLinejoin="round"
+            strokeLinecap="round"
+            vectorEffect="non-scaling-stroke"
+          />
+          <path
+            d={fPath}
+            stroke="var(--tomato)"
+            strokeWidth={1.6}
+            fill="none"
+            strokeLinejoin="round"
+            strokeLinecap="round"
+            vectorEffect="non-scaling-stroke"
+          />
+          <path
+            d={yuanPath}
+            stroke="var(--teal)"
+            strokeWidth={1.8}
+            fill="none"
+            strokeLinejoin="round"
+            strokeLinecap="round"
+            vectorEffect="non-scaling-stroke"
+          />
+
+          {/* dots — only on 7d view */}
+          {showDots && (
+            <>
+              {hValues.map((v, i) => (
+                <circle
+                  key={`h-${i}`}
+                  cx={xAt(i)}
+                  cy={yAt(v)}
+                  r={dotR}
+                  fill="var(--sage)"
+                >
+                  <title>{`${N - 1 - i} 天前 · H ${v}`}</title>
+                </circle>
+              ))}
+              {fValues.map((v, i) => (
+                <circle
+                  key={`f-${i}`}
+                  cx={xAt(i)}
+                  cy={yAt(v)}
+                  r={dotR}
+                  fill="var(--tomato)"
+                >
+                  <title>{`${N - 1 - i} 天前 · F ${v}`}</title>
+                </circle>
+              ))}
+              {yuanValues.map((v, i) => (
+                <circle
+                  key={`yuan-${i}`}
+                  cx={xAt(i)}
+                  cy={yMoneyAt(v)}
+                  r={dotR}
+                  fill="var(--teal)"
+                >
+                  <title>{`${N - 1 - i} 天前 · 可花 ¥${v}`}</title>
+                </circle>
+              ))}
+            </>
+          )}
         </>
       )}
     </svg>
   );
+}
+
+function niceCeil(value: number) {
+  if (value <= 5) return 5;
+  if (value <= 10) return 10;
+  const pow = Math.pow(10, Math.floor(Math.log10(value)));
+  return Math.ceil(value / pow) * pow;
+}
+
+function normalizeSeries(series: number[], length: number) {
+  return Array.from({ length }, (_, i) => {
+    const value = series[i] ?? 0;
+    return Number.isFinite(value) ? Math.max(0, value) : 0;
+  });
 }
 
 function Donut({
@@ -745,24 +863,26 @@ function Donut({
   size = 140,
   thickness = 24,
 }: {
-  data: { tag: TagConfig; pct: number }[];
+  data: { tag: TagConfig; count: number; pct: number }[];
   size?: number;
   thickness?: number;
 }) {
   const r = (size - thickness) / 2;
   const cx = size / 2;
   const cy = size / 2;
-  const total = data.reduce((acc, d) => acc + d.pct, 0) || 1;
+  const total = data.reduce((acc, d) => acc + d.count, 0);
+  const circumference = 2 * Math.PI * r;
+  const nonZero = data.filter((d) => d.count > 0);
 
   // Build a one-line summary for the SVG aria-label so screen readers
   // get the distribution at a glance: "math 40%, cs 25%, english 20%, ..."
   const summary = data
     .filter((d) => d.pct > 0)
     .sort((a, b) => b.pct - a.pct)
-    .map((d) => `${d.tag.label} ${d.pct}%`)
+    .map((d) => `${d.tag.label} ${formatPct(d.pct)}%`)
     .join("，");
   const ariaLabel = summary ? `tag 分布：${summary}` : "tag 分布：暂无数据";
-  let start = -Math.PI / 2; // start at 12 o'clock
+  let offset = 0;
   return (
     <svg
       width={size}
@@ -771,31 +891,47 @@ function Donut({
       role="img"
       aria-label={ariaLabel}
     >
-      {data.map((d) => {
-        const angle = (d.pct / total) * Math.PI * 2;
-        const end = start + angle;
-        const x1 = cx + r * Math.cos(start);
-        const y1 = cy + r * Math.sin(start);
-        const x2 = cx + r * Math.cos(end);
-        const y2 = cy + r * Math.sin(end);
-        const large = angle > Math.PI ? 1 : 0;
-        const path = `M ${cx} ${cy} L ${x1} ${y1} A ${r} ${r} 0 ${large} 1 ${x2} ${y2} Z`;
-        const slice = (
-          <path
+      <circle
+        cx={cx}
+        cy={cy}
+        r={r}
+        fill="none"
+        stroke="var(--rule)"
+        strokeWidth={thickness}
+      />
+      {nonZero.map((d) => {
+        const dash = nonZero.length === 1 ? circumference : (d.count / total) * circumference;
+        const circle = (
+          <circle
             key={d.tag.id}
-            d={path}
-            fill={TAG_FILL_VAR[d.tag.color]}
-            stroke="var(--paper)"
-            strokeWidth="1"
+            cx={cx}
+            cy={cy}
+            r={r}
+            fill="none"
+            stroke={TAG_FILL_VAR[d.tag.color]}
+            strokeWidth={thickness}
+            strokeDasharray={`${dash} ${Math.max(0, circumference - dash)}`}
+            strokeDashoffset={-offset}
+            strokeLinecap="butt"
+            transform={`rotate(-90 ${cx} ${cy})`}
           >
-            <title>{`${d.tag.label} ${d.pct}%`}</title>
-          </path>
+            <title>{`${d.tag.label} ${formatPct(d.pct)}%`}</title>
+          </circle>
         );
-        start = end;
-        return slice;
+        offset += dash;
+        return circle;
       })}
-      {/* Donut hole */}
-      <circle cx={cx} cy={cy} r={r - thickness / 2} fill="var(--paper)" />
+      <text
+        x={cx}
+        y={cy}
+        textAnchor="middle"
+        dominantBaseline="middle"
+        fontSize="20"
+        fill={total > 0 ? "var(--ink)" : "var(--ink-mute)"}
+        fontFamily="var(--font-mono, ui-monospace)"
+      >
+        {total}
+      </text>
     </svg>
   );
 }

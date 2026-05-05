@@ -1,17 +1,17 @@
 "use client";
 
 /**
- * EntertainmentRunningView — full-screen overlay shown while a play
- * session is active. Mirrors RunningView's vocabulary (large mono
- * countdown + long-press end), but no confetti. Ending early refunds
- * the unused pool minutes; ending naturally (timer reaches 0) does not.
+ * EntertainmentRunningView — compact global rail shown while a play
+ * session is active. It keeps the countdown visible across routes without
+ * blocking the rest of the app. Ending early refunds the unused pool
+ * minutes; ending naturally (timer reaches 0) does not.
  */
 
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
+import { useHoldConfirm } from "@/components/timer/use-hold-confirm";
+import { useWallClockNow } from "@/components/timer/use-wall-clock-now";
 import type { PlaySession } from "@/lib/types";
-
-const HOLD_MS = 1500;
 
 const TYPE_LABEL: Record<PlaySession["type"], string> = {
   active: "主动型",
@@ -29,11 +29,34 @@ function fmtMmSs(sec: number): string {
   return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
 }
 
+function firePlayNotification() {
+  try {
+    if (
+      typeof window !== "undefined" &&
+      "Notification" in window &&
+      Notification.permission === "granted"
+    ) {
+      new Notification("娱乐时间到了", {
+        body: "时间池里的份额已经用完",
+        icon: "/icon.png",
+        tag: "tokmato-play",
+      });
+    }
+  } catch {
+    // Notification can throw in embedded or permission-changing contexts.
+  }
+}
+
 export interface EntertainmentRunningViewProps {
   session: PlaySession;
   /** Called when timer reaches 0 OR user long-presses end early.
    *  `refundMinutes` is non-zero only on early-end. */
-  onEnd: (data: { refundMinutes: number }) => void;
+  onEnd: (data: {
+    refundMinutes: number;
+    result?: string;
+    completeKanban?: boolean;
+    kanbanCardId?: string;
+  }) => void;
 }
 
 export function EntertainmentRunningView({
@@ -43,31 +66,24 @@ export function EntertainmentRunningView({
   const totalMs = session.totalMinutes * 60 * 1000;
   const costMinutes = session.costMinutes ?? session.totalMinutes;
   const refundScale = session.totalMinutes > 0 ? costMinutes / session.totalMinutes : 1;
-  const [now, setNow] = useState(() => Date.now());
+  const [pendingRefund, setPendingRefund] = useState<number | null>(null);
+  const [result, setResult] = useState(session.task ?? "");
+  const [completeKanban, setCompleteKanban] = useState(!!session.kanbanCardId);
+  const now = useWallClockNow({ paused: pendingRefund !== null });
   const secondsLeft = Math.max(
     0,
     Math.ceil((totalMs - (now - session.startedAt)) / 1000)
   );
-  const [holding, setHolding] = useState(0);
-  const holdTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Wall-clock tick + visibility resync — keeps the displayed countdown
-  // accurate even after a backgrounded tab or short close.
-  useEffect(() => {
-    const sync = () => setNow(Date.now());
-    sync();
-    const id = setInterval(sync, 250);
-    const onVisible = () => sync();
-    document.addEventListener("visibilitychange", onVisible);
-    window.addEventListener("focus", onVisible);
-    window.addEventListener("pageshow", onVisible);
-    return () => {
-      clearInterval(id);
-      document.removeEventListener("visibilitychange", onVisible);
-      window.removeEventListener("focus", onVisible);
-      window.removeEventListener("pageshow", onVisible);
-    };
-  }, []);
+  const finish = (refundMinutes: number) => {
+    if (session.kanbanCardId) {
+      setPendingRefund(refundMinutes);
+      setResult(session.task ?? "");
+      setCompleteKanban(true);
+      return;
+    }
+    onEnd({ refundMinutes });
+  };
 
   // Auto-end at boundary
   const endedRef = useRef(false);
@@ -75,100 +91,121 @@ export function EntertainmentRunningView({
     if (endedRef.current) return;
     if (secondsLeft <= 0) {
       endedRef.current = true;
-      onEnd({ refundMinutes: 0 });
+      firePlayNotification();
+      finish(0);
     }
-  }, [secondsLeft, onEnd]);
+  }, [secondsLeft]);
 
-  // Long-press end
-  const startHold = () => {
-    setHolding(0);
-    const start = Date.now();
-    holdTimerRef.current = setInterval(() => {
-      const t = (Date.now() - start) / HOLD_MS;
-      if (t >= 1) {
-        if (holdTimerRef.current) clearInterval(holdTimerRef.current);
-        setHolding(1);
-        // Refund unused pool cost, not just visible timer minutes.
-        const refund = Math.floor((secondsLeft / 60) * refundScale);
-        onEnd({ refundMinutes: refund });
-      } else {
-        setHolding(t);
-      }
-    }, 16);
-  };
-  const cancelHold = () => {
-    if (holdTimerRef.current) {
-      clearInterval(holdTimerRef.current);
-      holdTimerRef.current = null;
-    }
-    setHolding(0);
-  };
-  useEffect(() => () => cancelHold(), []);
+  const { holding, startHold, cancelHold } = useHoldConfirm(() => {
+    // Refund unused pool cost, not just visible timer minutes.
+    const refund = Math.floor((secondsLeft / 60) * refundScale);
+    finish(refund);
+  });
 
   const totalSec = totalMs / 1000;
   const progress = totalSec > 0 ? 1 - secondsLeft / totalSec : 1;
+  const isResolving = pendingRefund !== null;
 
   return (
     <div
-      role="dialog"
-      aria-label="娱乐进行中"
-      className="fade-in fixed inset-0 z-[180] flex flex-col items-center justify-center gap-10 bg-ink/95 p-6 text-paper backdrop-blur-md"
+      role="timer"
+      aria-live="off"
+      aria-label="娱乐计时器"
+      className="pointer-events-none fixed inset-x-0 bottom-[calc(var(--mobile-nav-h)+var(--safe-b)+12px)] z-[95] flex justify-center px-3 wide:inset-x-auto wide:right-6 wide:bottom-6 wide:justify-end wide:px-0"
     >
-      {/* Type label */}
-      <div className="flex flex-col items-center gap-2 text-center">
-        <div className="smallcaps text-paper/60">娱乐进行中</div>
-        <div
-          className={cn(
-            "serif italic text-h2 leading-tight",
-            TYPE_TONE[session.type]
-          )}
-        >
-          {TYPE_LABEL[session.type]}
-        </div>
-      </div>
-
-      {/* Big mono countdown */}
-      <div className="flex flex-col items-center gap-3">
-        <div className="font-mono text-display leading-none tracking-tight text-paper">
-          {fmtMmSs(secondsLeft)}
-        </div>
-        {/* Thin progress bar */}
-        <div className="mt-2 h-1 w-56 overflow-hidden rounded-full bg-paper/15">
+      <div className="pointer-events-auto fade-in w-full max-w-[520px] overflow-hidden rounded-xl border border-rule bg-paper/95 shadow-lift backdrop-blur-xl wide:w-[420px]">
+        <div className="h-1 bg-rule">
           <div
             className="h-full bg-teal transition-[width] duration-1000 ease-linear"
             style={{ width: `${progress * 100}%` }}
             aria-hidden
           />
         </div>
-        <div className="mono text-xs text-paper/60 tabular-nums">
-          {session.totalMinutes} min · 已扣 {costMinutes} min
-        </div>
-      </div>
 
-      {/* Long-press end */}
-      <button
-        type="button"
-        onPointerDown={startHold}
-        onPointerUp={cancelHold}
-        onPointerLeave={cancelHold}
-        onPointerCancel={cancelHold}
-        className={cn(
-          "relative flex h-14 w-64 max-w-full select-none items-center justify-center overflow-hidden rounded-full",
-          "border border-paper/20 bg-paper/5 text-paper transition active:scale-[0.99]"
+        <div className="flex items-center gap-3 px-4 py-3">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <span className="smallcaps text-teal-deep">娱乐</span>
+              <span
+                className={cn(
+                  "serif italic text-[17px] leading-tight",
+                  TYPE_TONE[session.type]
+                )}
+              >
+                {TYPE_LABEL[session.type]}
+              </span>
+            </div>
+            <div className="mono mt-1 text-[11px] leading-tight text-ink-3 tabular-nums">
+              {isResolving
+                ? "结束反馈"
+                : `${session.totalMinutes} min · 已扣 ${costMinutes} min`}
+            </div>
+          </div>
+
+          {isResolving ? (
+            <button
+              type="button"
+              onClick={() =>
+                onEnd({
+                  refundMinutes: pendingRefund,
+                  result: result.trim() || session.task,
+                  completeKanban,
+                  kanbanCardId: session.kanbanCardId,
+                })
+              }
+              className="h-11 shrink-0 rounded-lg bg-ink px-4 text-[12px] font-medium text-paper"
+            >
+              入账
+            </button>
+          ) : (
+            <>
+              <div className="font-mono text-[30px] leading-none text-ink tabular-nums">
+                {fmtMmSs(secondsLeft)}
+              </div>
+
+              <button
+                type="button"
+                onPointerDown={startHold}
+                onPointerUp={cancelHold}
+                onPointerLeave={cancelHold}
+                onPointerCancel={cancelHold}
+                className={cn(
+                  "relative grid h-11 w-20 shrink-0 select-none place-items-center overflow-hidden rounded-lg",
+                  "border border-rule bg-paper-2 text-[12px] font-medium text-ink transition active:scale-[0.99]"
+                )}
+              >
+                <div
+                  aria-hidden
+                  className="absolute inset-0 origin-left bg-teal-soft transition-transform duration-75"
+                  style={{ transform: `scaleX(${holding})` }}
+                />
+                <span className="relative z-10">
+                  {holding > 0.05 ? "按住" : "结束"}
+                </span>
+              </button>
+            </>
+          )}
+        </div>
+        {isResolving && (
+          <div className="border-t border-rule px-4 py-3">
+            <input
+              value={result}
+              onChange={(e) => setResult(e.target.value)}
+              aria-label="娱乐结果"
+              className="w-full border-0 border-b border-rule bg-transparent py-1.5 font-kaiti text-[14px] text-ink focus:border-teal focus:outline-none"
+            />
+            <label className="mt-2 flex items-center gap-2 text-[12px] text-ink-2">
+              <input
+                type="checkbox"
+                checked={completeKanban}
+                onChange={(e) => setCompleteKanban(e.target.checked)}
+                className="[accent-color:var(--teal)]"
+              />
+              完成此 Kanban 任务
+            </label>
+          </div>
         )}
-      >
-        <div
-          aria-hidden
-          className="absolute inset-0 origin-left bg-paper/15 transition-transform duration-75"
-          style={{ transform: `scaleX(${holding})` }}
-        />
-        <span className="relative z-10 text-sm font-medium tracking-wider">
-          {holding > 0.05 ? "再长按一会儿..." : "长按提前结束"}
-        </span>
-      </button>
-      <p className="-mt-6 text-center text-[11px] text-paper/50">
-        提前结束剩余分钟会回到时间池
-      </p>
+      </div>
     </div>
   );
 }

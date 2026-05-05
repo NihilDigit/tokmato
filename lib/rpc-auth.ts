@@ -38,7 +38,14 @@ function getSecret(): string {
 }
 
 async function tryBearer(): Promise<string | null> {
-  const headerList = await headers();
+  let headerList: Awaited<ReturnType<typeof headers>>;
+  try {
+    headerList = await headers();
+  } catch {
+    // Unit tests and direct server-action calls can run outside a request
+    // scope. In that case there is no bearer header to read.
+    return null;
+  }
   const auth = headerList.get("authorization");
   if (!auth) return null;
   const match = auth.match(/^Bearer\s+(.+)$/i);

@@ -48,8 +48,11 @@ export const kvKey = {
    *  pushSubscriptions but feeds the priority:high path that bypasses
    *  Doze on locked screens. */
   fcmTokens: (userId: string) => `tokmato:user:${userId}:fcm:tokens`,
-  /** Currently-pending QStash messageId for the next phase boundary. */
+  /** Currently-pending QStash messageId for the next pomodoro phase boundary. */
   pushPending: (userId: string) => `tokmato:user:${userId}:push:pending`,
+  /** Single-fire entertainment-end QStash message. Kept separate from
+   *  pomodoro so ending/skipping one timer does not cancel the other. */
+  playPushPending: (userId: string) => `tokmato:user:${userId}:push:pending:play`,
   /** Cross-device "another device is running a pomodoro" read-only marker.
    *  Lives with a TTL — auto-clears if the writing device crashes mid-run. */
   activeSession: (userId: string) => `tokmato:user:${userId}:active`,

@@ -18,15 +18,17 @@
 import { useEffect, useRef, useState } from "react";
 import { TomatoIcon } from "@/components/animations/TomatoIcon";
 import { NotesSheet } from "@/components/sheets/NotesSheet";
+import { ResponsiveSheet } from "@/components/ui/responsive-sheet";
 import { useStore } from "@/lib/store";
 import { startPushChain } from "@/app/actions/push";
 import { setActiveSession } from "@/app/actions/active-session";
 import { cn } from "@/lib/utils";
+import { useHoldConfirm } from "@/components/timer/use-hold-confirm";
+import { useWallClockNow } from "@/components/timer/use-wall-clock-now";
 import type { PomodoroSession, KanbanColumnId } from "@/lib/types";
 
 const POMO_MS = 25 * 60 * 1000;
 const BUFFER_MS = 60 * 1000;
-const HOLD_MS = 1500;
 
 const TAG_TONE: Record<string, { bg: string; text: string }> = {
   cs: { bg: "bg-paper-2", text: "text-ink" },
@@ -71,7 +73,8 @@ export interface RunningViewProps {
    *  `assignments` maps each note to a kanban column or "delete". */
   onEnd: (
     assignments: { note: string; action: KanbanColumnId | "delete" }[],
-    completedCount: number
+    completedCount: number,
+    feedback: { result: string; completeKanban: boolean; kanbanCardId?: string }
   ) => void;
 }
 
@@ -82,22 +85,26 @@ export function RunningView({ session, onEnd }: RunningViewProps) {
   const { mode, count, phaseStartedAt } = session;
   const phaseDuration = mode === "running" ? POMO_MS : BUFFER_MS;
 
-  // Wall-clock tick — single source of truth for displayed time.
-  const [now, setNow] = useState(() => Date.now());
-
   // Notes typed during this string of pomodoros — read straight from
   // the persisted session so a refresh / remount keeps them. Local
   // React state used to hold these and was lost across reloads.
   const notes = session.notes ?? [];
   const [noteDraft, setNoteDraft] = useState("");
 
-  // Long-press end progress (0..1)
-  const [holding, setHolding] = useState(0);
-  const holdTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
   // End flow state
   const [showNotesSheet, setShowNotesSheet] = useState(false);
+  const [showEndSheet, setShowEndSheet] = useState(false);
   const [pendingNotes, setPendingNotes] = useState<string[]>([]);
+  const pendingAwardCountRef = useRef(0);
+  const pendingFeedbackRef = useRef<{
+    result: string;
+    completeKanban: boolean;
+    kanbanCardId?: string;
+  } | null>(null);
+  const endResolvedRef = useRef(false);
+
+  // Wall-clock tick — single source of truth for displayed time.
+  const now = useWallClockNow({ paused: showNotesSheet || showEndSheet });
 
   // Track which boundary we've already notified for, to avoid double-fire
   // if the auto-advance and tick both observe the same crossing.
@@ -112,24 +119,6 @@ export function RunningView({ session, onEnd }: RunningViewProps) {
       Notification.requestPermission().catch(() => {});
     }
   }, []);
-
-  // ─── Wall-clock tick + visibility resync ───────────────────────────────
-  useEffect(() => {
-    if (showNotesSheet) return; // pause during end flow
-    const sync = () => setNow(Date.now());
-    sync();
-    const id = setInterval(sync, 250);
-    const onVisible = () => sync();
-    document.addEventListener("visibilitychange", onVisible);
-    window.addEventListener("focus", onVisible);
-    window.addEventListener("pageshow", onVisible);
-    return () => {
-      clearInterval(id);
-      document.removeEventListener("visibilitychange", onVisible);
-      window.removeEventListener("focus", onVisible);
-      window.removeEventListener("pageshow", onVisible);
-    };
-  }, [showNotesSheet]);
 
   // ─── Auto-advance + notify when phase boundary crosses ─────────────────
   useEffect(() => {
@@ -148,50 +137,59 @@ export function RunningView({ session, onEnd }: RunningViewProps) {
     advancePhase({ now });
   }, [now, mode, count, phaseStartedAt, phaseDuration, advancePhase, showNotesSheet]);
 
-  // ─── Long-press end flow ────────────────────────────────────────────────
-  const startHold = () => {
-    setHolding(0);
-    const start = Date.now();
-    holdTimerRef.current = setInterval(() => {
-      const t = (Date.now() - start) / HOLD_MS;
-      if (t >= 1) {
-        if (holdTimerRef.current) clearInterval(holdTimerRef.current);
-        setHolding(1);
-        triggerEnd();
-      } else {
-        setHolding(t);
-      }
-    }, 16);
-  };
-  const cancelHold = () => {
-    if (holdTimerRef.current) {
-      clearInterval(holdTimerRef.current);
-      holdTimerRef.current = null;
-    }
-    setHolding(0);
-  };
-  useEffect(() => () => cancelHold(), []);
-
   // Long-press end is a *deliberate cut-off*, not a celebration —
   // skip confetti and go straight to notes review (or end if empty).
   const triggerEnd = () => {
+    if (endResolvedRef.current) return;
     const finalNotes = noteDraft.trim()
       ? [...notes, noteDraft.trim()]
       : notes;
     const awardCount = mode === "buffer" ? count : Math.max(0, count - 1);
+    pendingAwardCountRef.current = awardCount;
     setPendingNotes(finalNotes);
-    if (finalNotes.length === 0) {
-      onEnd([], awardCount);
-    } else {
+    setShowEndSheet(true);
+  };
+
+  const finalizeEnd = (
+    assignments: { note: string; action: KanbanColumnId | "delete" }[]
+  ) => {
+    if (endResolvedRef.current) return;
+    endResolvedRef.current = true;
+    onEnd(
+      assignments,
+      pendingAwardCountRef.current,
+      pendingFeedbackRef.current ?? {
+        result: session.task,
+        completeKanban: false,
+        kanbanCardId: session.kanbanCardId,
+      }
+    );
+  };
+
+  const handleEndFeedbackConfirm = (feedback: {
+    result: string;
+    completeKanban: boolean;
+  }) => {
+    pendingFeedbackRef.current = {
+      result: feedback.result,
+      completeKanban: feedback.completeKanban,
+      kanbanCardId: session.kanbanCardId,
+    };
+    setShowEndSheet(false);
+    if (pendingNotes.length > 0) {
       setShowNotesSheet(true);
+      return;
     }
+    finalizeEnd([]);
   };
 
   const handleNotesConfirm = (assignments: { note: string; action: KanbanColumnId | "delete" }[]) => {
     setShowNotesSheet(false);
-    const awardCount = mode === "buffer" ? count : Math.max(0, count - 1);
-    onEnd(assignments, awardCount);
+    finalizeEnd(assignments);
   };
+
+  // ─── Long-press end flow ────────────────────────────────────────────────
+  const { holding, startHold, cancelHold } = useHoldConfirm(triggerEnd);
 
   // ─── Note input ─────────────────────────────────────────────────────────
   const submitNote = () => {
@@ -361,6 +359,20 @@ export function RunningView({ session, onEnd }: RunningViewProps) {
       </section>
 
       {/* End-flow overlay — long-press end is a deliberate cut-off, no confetti */}
+      <PomodoroEndSheet
+        open={showEndSheet}
+        expected={session.task}
+        bound={!!session.kanbanCardId}
+        onOpenChange={(v) => {
+          if (!v && showEndSheet) {
+            handleEndFeedbackConfirm({
+              result: session.task,
+              completeKanban: false,
+            });
+          }
+        }}
+        onConfirm={handleEndFeedbackConfirm}
+      />
       <NotesSheet
         open={showNotesSheet}
         onOpenChange={(v) => {
@@ -375,6 +387,88 @@ export function RunningView({ session, onEnd }: RunningViewProps) {
         onConfirm={handleNotesConfirm}
       />
     </main>
+  );
+}
+
+function PomodoroEndSheet({
+  open,
+  expected,
+  bound,
+  onOpenChange,
+  onConfirm,
+}: {
+  open: boolean;
+  expected: string;
+  bound: boolean;
+  onOpenChange: (open: boolean) => void;
+  onConfirm: (data: { result: string; completeKanban: boolean }) => void;
+}) {
+  const [result, setResult] = useState(expected);
+  const [completeKanban, setCompleteKanban] = useState(bound);
+
+  useEffect(() => {
+    if (!open) return;
+    setResult(expected);
+    setCompleteKanban(bound);
+  }, [open, expected, bound]);
+
+  const confirm = () =>
+    onConfirm({
+      result: result.trim() || expected,
+      completeKanban: bound && completeKanban,
+    });
+
+  return (
+    <ResponsiveSheet
+      open={open}
+      onOpenChange={onOpenChange}
+      title="结束反馈"
+    >
+      <div className="flex flex-col gap-5">
+        <div>
+          <div className="smallcaps mb-2">预期</div>
+          <div className="serif text-[18px] leading-snug text-ink">{expected}</div>
+        </div>
+        <div>
+          <div className="smallcaps mb-2">结果</div>
+          <input
+            value={result}
+            onChange={(e) => setResult(e.target.value)}
+            className={cn(
+              "w-full border-0 border-b border-rule bg-transparent px-0 py-2",
+              "font-kaiti text-[16px] text-ink focus:border-tomato focus:outline-none"
+            )}
+          />
+        </div>
+        {bound && (
+          <label className="flex items-center gap-2 text-[13px] text-ink-2">
+            <input
+              type="checkbox"
+              checked={completeKanban}
+              onChange={(e) => setCompleteKanban(e.target.checked)}
+              className="[accent-color:var(--tomato)]"
+            />
+            完成此 Kanban 任务
+          </label>
+        )}
+        <div className="flex justify-end gap-2 border-t border-rule pt-5">
+          <button
+            type="button"
+            onClick={() => onOpenChange(false)}
+            className="min-h-10 rounded-full px-4 text-sm text-ink-3 hover:text-ink"
+          >
+            跳过
+          </button>
+          <button
+            type="button"
+            onClick={confirm}
+            className="min-h-10 rounded-full bg-ink px-5 text-sm font-medium text-paper"
+          >
+            继续
+          </button>
+        </div>
+      </div>
+    </ResponsiveSheet>
   );
 }
 

@@ -23,8 +23,8 @@
  *                                      manual phase advance. Rotating
  *                                      sessionId invalidates any
  *                                      in-flight chain.
- *   cancelPushChain()                — endSession; future chain links
- *                                      no-op on sessionId mismatch.
+ *   cancelPushChain(scope?)          — endSession/endPlay; future chain
+ *                                      links no-op on sessionId mismatch.
  *
  * The chain itself self-perpetuates inside `/api/push/fire` — each
  * delivered notification schedules the next boundary, so the client
@@ -61,6 +61,10 @@ const startChainSchema = z.object({
   kind: z.enum(["running-end", "buffer-end", "play-end"]),
   count: z.number().int().min(1).max(1000),
 });
+
+const cancelScopeSchema = z
+  .enum(["pomodoro", "play", "all"])
+  .optional();
 
 class PushError extends Error {
   readonly code:
@@ -119,10 +123,9 @@ const removeArgSchema = z
  * Drop a subscription. Pass the endpoint to drop only that device;
  * pass nothing to drop every device for this user.
  *
- * The "drop all" mode also tears down the active chain — there's
- * nothing to deliver to, so QStash credits would be wasted. Single-
- * device removal leaves the chain alive: the user's other devices
- * still want their boundary alerts.
+ * The "drop all" mode tears down scheduled callbacks only when no FCM
+ * transport remains. Single-device removal leaves callbacks alive: the
+ * user's other devices still want their boundary alerts.
  */
 export async function removePushSubscription(
   endpoint?: string
@@ -136,7 +139,10 @@ export async function removePushSubscription(
     return { ok: true };
   }
   await redis.del(kvKey.pushSubscriptions(userId));
-  await redis.del(kvKey.pushPending(userId));
+  if ((await redis.hlen(kvKey.fcmTokens(userId))) === 0) {
+    await redis.del(kvKey.pushPending(userId));
+    await redis.del(kvKey.playPushPending(userId));
+  }
   // Migration: also nuke the legacy single-sub key on a panic teardown.
   await redis.del(oldSingleSubKey(userId));
   return { ok: true };
@@ -148,6 +154,15 @@ const fcmTokenSchema = z.string().min(40).max(500);
  *  `endpointField` for web push subs — sha1 truncated to 16 hex chars. */
 function fcmTokenField(token: string): string {
   return createHash("sha1").update(token).digest("hex").slice(0, 16);
+}
+
+function pendingKeyForKind(
+  userId: string,
+  kind: z.infer<typeof startChainSchema>["kind"]
+): string {
+  return kind === "play-end"
+    ? kvKey.playPushPending(userId)
+    : kvKey.pushPending(userId);
 }
 
 /**
@@ -186,6 +201,10 @@ export async function removeFcmToken(token?: string): Promise<{ ok: true }> {
     return { ok: true };
   }
   await redis.del(kvKey.fcmTokens(userId));
+  if ((await redis.hlen(kvKey.pushSubscriptions(userId))) === 0) {
+    await redis.del(kvKey.pushPending(userId));
+    await redis.del(kvKey.playPushPending(userId));
+  }
   return { ok: true };
 }
 
@@ -221,7 +240,8 @@ export async function startPushChain(
   // Best-effort cancel of the prior pending message so we don't burn
   // QStash quota on a stale schedule. The sessionId rotation below is
   // what actually guarantees the old chain dies if cancel fails.
-  const prior = await redis.get<{ messageId: string }>(kvKey.pushPending(userId));
+  const pendingKey = pendingKeyForKind(userId, parsed.data.kind);
+  const prior = await redis.get<{ messageId: string }>(pendingKey);
   if (prior?.messageId) {
     void cancelMessage(prior.messageId);
   }
@@ -238,7 +258,7 @@ export async function startPushChain(
     delaySeconds,
   });
 
-  await redis.set(kvKey.pushPending(userId), {
+  await redis.set(pendingKey, {
     messageId,
     sessionId: parsed.data.sessionId,
   });
@@ -249,11 +269,28 @@ export async function startPushChain(
  * Stop firing notifications for the active session. Future chain
  * links will no-op when they see the cleared sessionId.
  */
-export async function cancelPushChain(): Promise<{ ok: true }> {
+export async function cancelPushChain(
+  scope?: z.infer<typeof cancelScopeSchema>
+): Promise<{ ok: true }> {
   const userId = await getUserId();
+  const parsed = cancelScopeSchema.safeParse(scope);
+  if (!parsed.success) throw new PushError("INVALID_PAYLOAD");
+  const normalized = parsed.data ?? "pomodoro";
   const redis = requireRedis();
-  const prior = await redis.get<{ messageId: string }>(kvKey.pushPending(userId));
-  if (prior?.messageId) void cancelMessage(prior.messageId);
-  await redis.del(kvKey.pushPending(userId));
+
+  const keys =
+    normalized === "all"
+      ? [kvKey.pushPending(userId), kvKey.playPushPending(userId)]
+      : normalized === "play"
+        ? [kvKey.playPushPending(userId)]
+        : [kvKey.pushPending(userId)];
+
+  await Promise.all(
+    keys.map(async (key) => {
+      const prior = await redis.get<{ messageId: string }>(key);
+      if (prior?.messageId) void cancelMessage(prior.messageId);
+      await redis.del(key);
+    })
+  );
   return { ok: true };
 }

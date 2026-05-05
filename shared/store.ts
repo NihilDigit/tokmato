@@ -207,12 +207,31 @@ interface StoreActions {
   spendFood: (data: { name: string; price: number; hSpent: number }) => void;
 
   // Entertainment session lifecycle (mirrors pomodoro)
-  startPlay: (data: { type: PlayType; minutes: number; costMinutes?: number }) => void;
-  endPlay: (data?: { refundMinutes?: number }) => void;
+  startPlay: (data: {
+    type: PlayType;
+    minutes: number;
+    costMinutes?: number;
+    task?: string;
+    kanbanCardId?: string;
+  }) => void;
+  endPlay: (data?: {
+    refundMinutes?: number;
+    result?: string;
+    kanbanCardId?: string;
+  }) => void;
 
   // Pomodoro session lifecycle
-  startSession: (data: { task: string; tag: TagId; type: SessionType }) => void;
-  endSession: (data?: { completedCount?: number }) => void;
+  startSession: (data: {
+    task: string;
+    tag: TagId;
+    type: SessionType;
+    kanbanCardId?: string;
+  }) => void;
+  endSession: (data?: {
+    completedCount?: number;
+    result?: string;
+    kanbanCardId?: string;
+  }) => void;
   addNoteToSession: (note: string) => void;
   /**
    * Advance the active session's phase based on wall-clock time.
@@ -501,7 +520,7 @@ export const useStore = create<Store>()(
           };
         }),
 
-      startPlay: ({ type, minutes, costMinutes }) =>
+      startPlay: ({ type, minutes, costMinutes, task, kanbanCardId }) =>
         set((s) => {
           // Deduct upfront; endPlay can refund unused minutes if user
           // ends early. clamp avoids going negative if budget changed.
@@ -510,6 +529,8 @@ export const useStore = create<Store>()(
           const startedAt = Date.now();
           const playSession: PlaySession = {
             type,
+            ...(task ? { task } : {}),
+            ...(kanbanCardId ? { kanbanCardId } : {}),
             totalMinutes: minutes,
             costMinutes: actualCost,
             startedAt,
@@ -524,7 +545,8 @@ export const useStore = create<Store>()(
                   minutesDelta: -actualCost,
                   createdAt: startedAt,
                   dayKey: todayKey(new Date(startedAt)),
-                  note: type,
+                  note: task || type,
+                  ...(kanbanCardId ? { refId: kanbanCardId } : {}),
                 }
               : null;
           return {
@@ -540,7 +562,27 @@ export const useStore = create<Store>()(
       endPlay: (data) =>
         set((s) => {
           const refund = data?.refundMinutes ?? 0;
+          const result = data?.result?.trim();
+          const kanbanCardId = data?.kanbanCardId;
           if (refund <= 0) {
+            if (result) {
+              const createdAt = Date.now();
+              const ledgerEntry: TokenLedgerEntry = {
+                id: `t-${createdAt}-${Math.random().toString(36).slice(2, 6)}`,
+                kind: "play",
+                fDelta: 0,
+                hDelta: 0,
+                createdAt,
+                dayKey: todayKey(new Date(createdAt)),
+                note: result,
+                ...(kanbanCardId ? { refId: kanbanCardId } : {}),
+              };
+              return {
+                playSession: null,
+                timePool: clamp(s.timePool + refund),
+                tokenHistory: [ledgerEntry, ...(s.tokenHistory ?? [])].slice(0, 1000),
+              };
+            }
             return {
               playSession: null,
               timePool: clamp(s.timePool + refund),
@@ -555,7 +597,8 @@ export const useStore = create<Store>()(
             minutesDelta: refund,
             createdAt,
             dayKey: todayKey(new Date(createdAt)),
-            note: "refund",
+            note: result || "refund",
+            ...(kanbanCardId ? { refId: kanbanCardId } : {}),
           };
           return {
             playSession: null,
@@ -583,10 +626,11 @@ export const useStore = create<Store>()(
           };
         }),
 
-      startSession: ({ task, tag, type }) => {
+      startSession: ({ task, tag, type, kanbanCardId }) => {
         const now = Date.now();
         const session: PomodoroSession = {
           task,
+          ...(kanbanCardId ? { kanbanCardId } : {}),
           tag,
           type,
           startedAt: now,
@@ -671,14 +715,17 @@ export const useStore = create<Store>()(
           );
           const totalFGain = fGain + bonusF;
           // Update recents
-          const taskName = s.session.task;
+          const taskName = data?.result?.trim() || s.session.task;
+          const kanbanCardId = data?.kanbanCardId ?? s.session.kanbanCardId;
           const filtered = s.recentTasks.filter((t) => t !== taskName);
           const recentTasks = [taskName, ...filtered].slice(0, 5);
           const endedAt = Date.now();
           const record: PomodoroRecord | null = completedCount > 0
             ? {
                 id: `p-${endedAt}-${Math.random().toString(36).slice(2, 6)}`,
-                task: taskName,
+                task: s.session.task,
+                ...(taskName !== s.session.task ? { result: taskName } : {}),
+                ...(kanbanCardId ? { kanbanCardId } : {}),
                 tag: s.session.tag,
                 type: s.session.type,
                 count: completedCount,
@@ -1075,4 +1122,3 @@ export function selectSnapshot(s: UserState): Partial<UserState> {
     foodPresets: s.foodPresets,
   };
 }
-

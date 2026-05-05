@@ -13,9 +13,11 @@
  * tab is closed.
  */
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { TomatoIcon } from "@/components/animations/TomatoIcon";
 import { cn } from "@/lib/utils";
+import { useHoldConfirm } from "@/components/timer/use-hold-confirm";
+import { useWallClockNow } from "@/components/timer/use-wall-clock-now";
 import type { ActiveSessionMarker } from "@/app/actions/active-session";
 
 const POMO_MS = 25 * 60 * 1000;
@@ -44,22 +46,21 @@ function fmtMmSs(ms: number): string {
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
-export function RemoteActiveView({ marker }: { marker: ActiveSessionMarker }) {
-  const [now, setNow] = useState(() => Date.now());
-
-  useEffect(() => {
-    const sync = () => setNow(Date.now());
-    sync();
-    const id = setInterval(sync, 250);
-    const onVisible = () => sync();
-    document.addEventListener("visibilitychange", onVisible);
-    window.addEventListener("focus", onVisible);
-    return () => {
-      clearInterval(id);
-      document.removeEventListener("visibilitychange", onVisible);
-      window.removeEventListener("focus", onVisible);
-    };
-  }, []);
+export function RemoteActiveView({
+  marker,
+  onForceEnd,
+}: {
+  marker: ActiveSessionMarker;
+  onForceEnd: () => Promise<void> | void;
+}) {
+  const [ending, setEnding] = useState(false);
+  const now = useWallClockNow();
+  const { holding, startHold, cancelHold } = useHoldConfirm(() => {
+    setEnding(true);
+    void Promise.resolve(onForceEnd()).catch(() => {
+      setEnding(false);
+    });
+  }, { disabled: ending });
 
   const phaseDuration = marker.mode === "running" ? POMO_MS : BUFFER_MS;
   const elapsed = Math.max(0, now - marker.phaseStartedAt);
@@ -111,8 +112,29 @@ export function RemoteActiveView({ marker }: { marker: ActiveSessionMarker }) {
               <span className="smallcaps text-ink-2">另一端正在运行</span>
             </div>
             <p className="text-sm leading-relaxed text-ink-2">
-              本端只读，禁止重复启动。等对端结束后这里会自动恢复。
+              本端默认只读，防止重复启动。若对端已经不可用，可以在这里结束服务器端番茄。
             </p>
+            <button
+              type="button"
+              onPointerDown={startHold}
+              onPointerUp={cancelHold}
+              onPointerLeave={cancelHold}
+              onPointerCancel={cancelHold}
+              disabled={ending}
+              className={cn(
+                "relative mt-1 min-h-11 overflow-hidden rounded-full border border-rule px-4 text-sm font-medium transition",
+                "text-ink-2 hover:border-tomato/40 hover:text-tomato disabled:opacity-50"
+              )}
+            >
+              <span
+                aria-hidden
+                className="absolute inset-y-0 left-0 bg-tomato/15"
+                style={{ width: `${holding * 100}%` }}
+              />
+              <span className="relative">
+                {ending ? "正在结束..." : holding > 0.05 ? "继续按住" : "长按结束远端番茄"}
+              </span>
+            </button>
           </div>
         </div>
       </section>

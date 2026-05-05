@@ -49,6 +49,7 @@ export type SessionMode = "running" | "buffer";
 
 export interface PomodoroSession {
   task: string;
+  kanbanCardId?: string;
   tag: TagId;
   type: SessionType;
   startedAt: number;       // ms epoch — session start (immutable)
@@ -61,6 +62,8 @@ export interface PomodoroSession {
 export interface PomodoroRecord {
   id: string;
   task: string;
+  result?: string;
+  kanbanCardId?: string;
   tag: TagId;
   type: SessionType;
   count: number;
@@ -192,6 +195,8 @@ export interface UserState {
 export type PlayType = "active" | "passive";
 export interface PlaySession {
   type: PlayType;
+  task?: string;
+  kanbanCardId?: string;
   totalMinutes: number; // visible timer duration
   costMinutes: number; // time-pool minutes deducted up front
   startedAt: number;    // ms epoch

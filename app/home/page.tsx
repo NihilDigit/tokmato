@@ -44,6 +44,7 @@ export default function HomePage() {
     startSession,
     endSession,
     addKanbanCard,
+    removeKanbanCard,
   } = useStore(
     useShallow((s) => ({
       session: s.session,
@@ -63,6 +64,7 @@ export default function HomePage() {
       startSession: s.startSession,
       endSession: s.endSession,
       addKanbanCard: s.addKanbanCard,
+      removeKanbanCard: s.removeKanbanCard,
     })),
   );
 
@@ -70,23 +72,30 @@ export default function HomePage() {
   const [openStart, setOpenStart] = useState(false);
   const [openSettle, setOpenSettle] = useState(false);
   const [initialTask, setInitialTask] = useState<string | undefined>(undefined);
-  const { remoteActive } = useActiveSession();
+  const { remoteActive, clearRemoteActive } = useActiveSession();
 
   // ─── Running state — conditional render after hooks ────────────────────
   if (session) {
     return (
       <RunningView
         session={session}
-        onEnd={(assignments, completedCount) => {
+        onEnd={(assignments, completedCount, feedback) => {
           for (const { note, action } of assignments) {
             if (action === "delete") continue;
             const id = `n-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
             addKanbanCard({ col: action, card: { id, name: note, next: "" } });
           }
-          endSession({ completedCount });
+          if (feedback.completeKanban && feedback.kanbanCardId) {
+            removeKanbanCard(feedback.kanbanCardId);
+          }
+          endSession({
+            completedCount,
+            result: feedback.result,
+            kanbanCardId: feedback.kanbanCardId,
+          });
           // Tear down the server-side push chain so no further
           // boundary notifications fire for the session we just ended.
-          void cancelPushChain().catch(() => {});
+          void cancelPushChain("pomodoro").catch(() => {});
           void clearActiveSession().catch(() => {});
         }}
       />
@@ -96,7 +105,18 @@ export default function HomePage() {
   // Another device is mid-pomodoro. Render a read-only mirror and
   // suppress the start affordance so we can't double-fire.
   if (remoteActive) {
-    return <RemoteActiveView marker={remoteActive} />;
+    return (
+      <RemoteActiveView
+        marker={remoteActive}
+        onForceEnd={async () => {
+          await Promise.allSettled([
+            cancelPushChain("pomodoro"),
+            clearActiveSession(),
+          ]);
+          clearRemoteActive();
+        }}
+      />
+    );
   }
 
   // Settle banner shows when today's settlement hasn't been done yet

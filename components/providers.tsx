@@ -121,7 +121,7 @@ function ProviderInner({ children }: { children: React.ReactNode }) {
     }
     if (!marker) return;
     void Promise.allSettled([
-      cancelPushChain().catch(() => undefined),
+      cancelPushChain("all").catch(() => undefined),
       clearActiveSession().catch(() => undefined),
     ]).then(() => {
       try {
@@ -201,9 +201,10 @@ function ProviderInner({ children }: { children: React.ReactNode }) {
     };
   }, [storeReady, status]);
 
-  // Read play session at the root so the timer overlay shows on any tab.
+  // Read play session at the root so the timer rail stays visible on any tab.
   const playSession = useStore((s) => s.playSession);
   const endPlay = useStore((s) => s.endPlay);
+  const removeKanbanCard = useStore((s) => s.removeKanbanCard);
 
   return (
     <ThemeProvider>
@@ -211,13 +212,17 @@ function ProviderInner({ children }: { children: React.ReactNode }) {
       {playSession && (
         <EntertainmentRunningView
           session={playSession}
-          onEnd={({ refundMinutes }) => {
-            endPlay({ refundMinutes });
-            // Cancel the play-end QStash callback if there is one — natural
-            // expiry races with the QStash fire by ~ms, so this may no-op
-            // (server already deleted pending after delivering). Either
-            // way we stop a stale chain from firing if user ends early.
-            void cancelPushChain().catch(() => {});
+          onEnd={({ refundMinutes, result, completeKanban, kanbanCardId }) => {
+            if (completeKanban && kanbanCardId) {
+              removeKanbanCard(kanbanCardId);
+            }
+            endPlay({ refundMinutes, result, kanbanCardId });
+            // Only early endings should cancel the scheduled play-end
+            // notification. Natural expiry keeps the QStash callback alive
+            // so a locked/closed device still gets pulled back.
+            if (refundMinutes > 0) {
+              void cancelPushChain("play").catch(() => {});
+            }
           }}
         />
       )}

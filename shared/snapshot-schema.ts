@@ -76,6 +76,7 @@ const bonusConfig = z.object({
 
 const pomodoroSession = z.object({
   task: z.string().max(STR_MED),
+  kanbanCardId: z.string().max(STR_SHORT).optional(),
   tag: tagId,
   type: sessionType,
   startedAt: epochMs,
@@ -88,6 +89,8 @@ const pomodoroSession = z.object({
 
 const playSession = z.object({
   type: playType,
+  task: z.string().max(STR_MED).optional(),
+  kanbanCardId: z.string().max(STR_SHORT).optional(),
   totalMinutes: minuteAmount,
   costMinutes: minuteAmount,
   startedAt: epochMs,
@@ -96,6 +99,8 @@ const playSession = z.object({
 const pomodoroRecord = z.object({
   id,
   task: z.string().max(STR_MED),
+  result: z.string().max(STR_MED).optional(),
+  kanbanCardId: z.string().max(STR_SHORT).optional(),
   tag: tagId,
   type: sessionType,
   count: safeInt,

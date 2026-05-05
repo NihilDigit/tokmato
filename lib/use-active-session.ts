@@ -23,6 +23,7 @@ const POLL_MS = 30_000;
 
 export function useActiveSession(): {
   remoteActive: ActiveSessionMarker | null;
+  clearRemoteActive: () => void;
 } {
   const { status } = useSession();
   const localStartedAt = useStore((s) => s.session?.startedAt ?? null);
@@ -87,5 +88,8 @@ export function useActiveSession(): {
 
   const isSelf =
     marker !== null && localStartedAt !== null && marker.startedAt === localStartedAt;
-  return { remoteActive: isSelf ? null : marker };
+  return {
+    remoteActive: isSelf ? null : marker,
+    clearRemoteActive: () => setMarker(null),
+  };
 }
