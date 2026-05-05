@@ -4,11 +4,13 @@
  * State machine:
  *   - local session  → <RunningView>
  *   - else, remote marker (other device) → <RemoteActiveView>
- *   - else  → idle: balances + quick start
+ *   - else  → idle: balances + start affordance
  */
 
+import { useState } from "react";
 import { Pressable, View } from "react-native";
 import { useStore } from "@tokmato/shared/store";
+import type { KanbanColumnId } from "@tokmato/shared/types";
 import { rpc } from "../../lib/rpc-client";
 import { PageShell } from "../../components/PageShell";
 import { RunningView } from "../../components/RunningView";
@@ -18,17 +20,43 @@ import {
 } from "../../components/RemoteActiveView";
 import { EditorialText } from "../../components/EditorialText";
 import { useTheme } from "../../lib/use-theme";
+import { StartSheet } from "../../components/sheets/StartSheet";
+import { NotesSheet } from "../../components/sheets/NotesSheet";
 
 export default function Home() {
   const session = useStore((s) => s.session);
   const ftoken = useStore((s) => s.ftoken);
   const htoken = useStore((s) => s.htoken);
   const timePool = useStore((s) => s.timePool);
-  const tags = useStore((s) => s.tags);
-  const startSession = useStore((s) => s.startSession);
   const endSession = useStore((s) => s.endSession);
+  const moveKanbanCard = useStore((s) => s.moveKanbanCard);
+  const addKanbanCard = useStore((s) => s.addKanbanCard);
   const remote = useRemoteActive();
   const theme = useTheme();
+
+  const [startOpen, setStartOpen] = useState(false);
+  const [notesReview, setNotesReview] = useState<{
+    notes: string[];
+    completedCount: number;
+  } | null>(null);
+
+  function applyAssignments(
+    assignments: { note: string; action: KanbanColumnId | "delete" }[],
+    completedCount: number,
+  ) {
+    for (const a of assignments) {
+      if (a.action === "delete") continue;
+      const card = {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        name: a.note,
+      };
+      addKanbanCard({ col: a.action, card });
+    }
+    void moveKanbanCard;
+    endSession({ completedCount });
+    void rpc.cancelPushChain().catch(() => {});
+    void rpc.clearActiveSession().catch(() => {});
+  }
 
   if (session) {
     return (
@@ -36,11 +64,28 @@ export default function Home() {
         <RunningView
           session={session}
           onEnd={(_assignments, completedCount) => {
-            endSession({ completedCount });
-            void rpc.cancelPushChain().catch(() => {});
-            void rpc.clearActiveSession().catch(() => {});
+            const notes = session.notes ?? [];
+            if (notes.length > 0) {
+              setNotesReview({ notes, completedCount });
+            } else {
+              applyAssignments([], completedCount);
+            }
           }}
         />
+        {notesReview ? (
+          <NotesSheet
+            open
+            notes={notesReview.notes}
+            onConfirm={(assignments) => {
+              applyAssignments(assignments, notesReview.completedCount);
+              setNotesReview(null);
+            }}
+            onClose={() => {
+              applyAssignments([], notesReview.completedCount);
+              setNotesReview(null);
+            }}
+          />
+        ) : null}
       </PageShell>
     );
   }
@@ -51,33 +96,6 @@ export default function Home() {
         <RemoteActiveView marker={remote} />
       </PageShell>
     );
-  }
-
-  const defaultTag = tags[0]?.id ?? "others";
-
-  function quickStart() {
-    startSession({ task: "", tag: defaultTag, type: "input" });
-    const startedAt = Date.now();
-    const sessionId = String(startedAt);
-    void rpc
-      .startPushChain({
-        sessionId,
-        boundaryAt: startedAt + 25 * 60 * 1000,
-        kind: "running-end",
-        count: 1,
-      })
-      .catch(() => {});
-    void rpc
-      .setActiveSession({
-        task: "",
-        tag: defaultTag,
-        type: "input",
-        startedAt,
-        phaseStartedAt: startedAt,
-        mode: "running",
-        count: 1,
-      })
-      .catch(() => {});
   }
 
   return (
@@ -95,7 +113,7 @@ export default function Home() {
         </View>
 
         <Pressable
-          onPress={quickStart}
+          onPress={() => setStartOpen(true)}
           style={{
             alignSelf: "flex-start",
             paddingVertical: 14,
@@ -106,13 +124,11 @@ export default function Home() {
           }}
         >
           <EditorialText weight="sans" size={15} color={theme.color.ink}>
-            开始一个番茄
+            开一个番茄
           </EditorialText>
         </Pressable>
-        <EditorialText weight="sans" size={12} color={theme.color.ink3}>
-          快速启动 · 默认标签 #{defaultTag} · 输入型 · 25 分钟
-        </EditorialText>
       </View>
+      <StartSheet open={startOpen} onClose={() => setStartOpen(false)} />
     </PageShell>
   );
 }
