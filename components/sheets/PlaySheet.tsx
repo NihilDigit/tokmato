@@ -168,41 +168,30 @@ export function PlaySheet({
       {kanbanCards.length > 0 && (
         <div className="mt-7">
           <div className="smallcaps mb-3">绑定 Kanban</div>
-          <div className="flex max-h-32 flex-col gap-1.5 overflow-y-auto pr-1">
-            <button
-              type="button"
-              onClick={() => setKanbanCardId(undefined)}
+          <label className="block">
+            <span className="sr-only">绑定 Kanban 任务</span>
+            <select
+              value={kanbanCardId ?? ""}
+              onChange={(e) => setKanbanCardId(e.target.value || undefined)}
               className={cn(
-                "flex min-h-9 items-center justify-between rounded-lg border px-3 text-left text-[13px] transition",
-                kanbanCardId === undefined
-                  ? "border-ink bg-ink/4 text-ink"
-                  : "border-rule text-ink-3 hover:border-ink/30 hover:text-ink"
+                "min-h-11 w-full min-w-0 rounded-lg border border-rule bg-paper px-3 text-[13px] text-ink",
+                "overflow-hidden text-ellipsis whitespace-nowrap",
+                "focus:border-teal focus:outline-none focus-visible:ring-2 focus-visible:ring-teal/30"
               )}
             >
-              不绑定
-            </button>
-            {kanbanCards.map(({ col, card }) => {
-              const selected = kanbanCardId === card.id;
-              return (
-                <button
-                  key={card.id}
-                  type="button"
-                  onClick={() => setKanbanCardId(card.id)}
-                  className={cn(
-                    "flex min-h-10 items-center justify-between gap-3 rounded-lg border px-3 text-left transition",
-                    selected
-                      ? "border-teal bg-teal/10 text-ink"
-                      : "border-rule text-ink-2 hover:border-teal/30"
-                  )}
-                >
-                  <span className="min-w-0 truncate text-[13px]">{card.name}</span>
-                  <span className="mono shrink-0 text-[11px] text-ink-mute">
-                    {COL_LABEL[col]}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
+              <option value="">不绑定</option>
+              {kanbanCards.map(({ col, card }) => {
+                return (
+                  <option
+                    key={card.id}
+                    value={card.id}
+                  >
+                    {COL_LABEL[col]} / {card.name}
+                  </option>
+                );
+              })}
+            </select>
+          </label>
         </div>
       )}
 
