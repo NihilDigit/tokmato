@@ -23,7 +23,6 @@
 
 import * as AuthSession from "expo-auth-session";
 import * as WebBrowser from "expo-web-browser";
-import Constants from "expo-constants";
 import { rpc, setStoredJwt, clearStoredJwt } from "./rpc-client";
 
 WebBrowser.maybeCompleteAuthSession();
@@ -35,17 +34,24 @@ const GITHUB_DISCOVERY: AuthSession.DiscoveryDocument = {
     "https://github.com/settings/connections/applications/{client_id}",
 };
 
-function clientId(): string {
-  const extra = Constants.expoConfig?.extra as
-    | { githubClientId?: string }
-    | undefined;
-  const id = extra?.githubClientId;
-  if (!id || id === "PLACEHOLDER_GITHUB_CLIENT_ID") {
+let cachedClientId: string | null = null;
+
+/**
+ * Resolves the GitHub OAuth client_id from the server. Single source
+ * of truth is Vercel's `AUTH_GITHUB_ID` env (same value web's
+ * next-auth uses). Cached in-memory after first call so the OAuth
+ * dance only pays one extra round-trip on cold start.
+ */
+async function clientId(): Promise<string> {
+  if (cachedClientId) return cachedClientId;
+  const out = await rpc.getGithubClientId();
+  if (!out.clientId) {
     throw new Error(
-      "GitHub OAuth client id missing — set expo.extra.githubClientId in app.json.",
+      "GitHub OAuth client id missing on server — check Vercel AUTH_GITHUB_ID env.",
     );
   }
-  return id;
+  cachedClientId = out.clientId;
+  return cachedClientId;
 }
 
 export type SignInResult =
@@ -62,8 +68,15 @@ export async function signInWithGithub(): Promise<SignInResult> {
     path: "auth/callback",
   });
 
+  let id: string;
+  try {
+    id = await clientId();
+  } catch {
+    return { ok: false, reason: "exchange_failed" };
+  }
+
   const request = new AuthSession.AuthRequest({
-    clientId: clientId(),
+    clientId: id,
     scopes: ["read:user"],
     redirectUri,
     usePKCE: true,
@@ -85,7 +98,7 @@ export async function signInWithGithub(): Promise<SignInResult> {
   try {
     tokenResp = await AuthSession.exchangeCodeAsync(
       {
-        clientId: clientId(),
+        clientId: id,
         code: result.params.code,
         redirectUri,
         extraParams: request.codeVerifier

@@ -168,4 +168,12 @@ export const rpc = {
       "/api/rpc/exchange-github-token",
       { method: "POST", body: { accessToken } },
     ),
+
+  /** No auth — see app/api/rpc/github-client-id/route.ts. The client_id
+   *  is non-secret (visible in the OAuth redirect URL); fetching it
+   *  removes the duplication with Vercel's AUTH_GITHUB_ID env. */
+  getGithubClientId: () =>
+    request<{ ok: true; clientId: string }>("/api/rpc/github-client-id", {
+      method: "GET",
+    }),
 };

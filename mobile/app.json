@@ -41,8 +41,7 @@
       "typedRoutes": true
     },
     "extra": {
-      "apiBase": "https://tokmato.nihildigit.dev",
-      "githubClientId": "PLACEHOLDER_GITHUB_CLIENT_ID"
+      "apiBase": "https://tokmato.nihildigit.dev"
     }
   }
 }

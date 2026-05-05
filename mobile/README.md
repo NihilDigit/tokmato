@@ -47,9 +47,12 @@ bunx expo run:android      # build + install dev APK on emulator
 Required env in `mobile/app.json` `expo.extra`:
 - `apiBase`: Defaults to `https://tokmato.nihildigit.dev`. Override
   for local dev: `bunx expo start` → press `?` → manual URL.
-- `githubClientId`: GitHub OAuth App client id. The web app and the
-  RN app can share one — GitHub allows multiple callback URIs per
-  app. Add `tokmato://auth/callback` alongside the web one.
+
+GitHub OAuth client_id is fetched from `/api/rpc/github-client-id`
+on first sign-in and cached in memory — the value lives in Vercel
+env as `AUTH_GITHUB_ID` (same one web's next-auth uses), no RN-side
+config needed. The OAuth App's callback list still needs to include
+`tokmato://auth/callback` alongside the web callback.
 
 ## Build pipeline
 
