@@ -89,7 +89,7 @@ export default function JourneyPage() {
 
   // Trend chart = daily closing balances, not daily income. A line chart
   // should show a state over time; tokenHistory deltas are folded into
-  // closing F/H balances, then the Redeem-page money value is derived.
+  // closing F/H balances.
   const balanceTrend = useMemo(
     () => buildBalanceTrend(tokenHistory, last30Keys),
     [tokenHistory, last30Keys],
@@ -174,7 +174,6 @@ export default function JourneyPage() {
       <TrendSection
         fSeries={balanceTrend.f}
         hSeries={balanceTrend.h}
-        yuanSeries={balanceTrend.yuan}
       />
 
       {/* Heatmap (left 50%) + Donut (right 50%) — single visual section */}
@@ -534,7 +533,6 @@ function buildBalanceTrend(entries: TokenLedgerEntry[], dayKeys: string[]) {
 
   const fSeries: number[] = [];
   const hSeries: number[] = [];
-  const yuanSeries: number[] = [];
 
   for (const dayKey of dayKeys) {
     for (const entry of byDay.get(dayKey) ?? []) {
@@ -545,10 +543,9 @@ function buildBalanceTrend(entries: TokenLedgerEntry[], dayKeys: string[]) {
     const hBalance = Math.max(0, round1(h));
     fSeries.push(fBalance);
     hSeries.push(hBalance);
-    yuanSeries.push(round1(fBalance * 5 + hBalance * 10));
   }
 
-  return { f: fSeries, h: hSeries, yuan: yuanSeries };
+  return { f: fSeries, h: hSeries };
 }
 
 function exportJourneyJson(records: unknown[]) {
@@ -571,21 +568,18 @@ function exportJourneyJson(records: unknown[]) {
 function TrendSection({
   fSeries,
   hSeries,
-  yuanSeries,
 }: {
   fSeries: number[];
   hSeries: number[];
-  yuanSeries: number[];
 }) {
   const [range, setRange] = useState<7 | 30>(30);
   const f = range === 7 ? fSeries.slice(-7) : fSeries;
   const h = range === 7 ? hSeries.slice(-7) : hSeries;
-  const yuan = range === 7 ? yuanSeries.slice(-7) : yuanSeries;
 
   return (
     <section className="flex flex-col gap-4">
       <SectionHead
-        kicker="F · H · ¥"
+        kicker="F · H"
         title="余额"
         right={
           <div className="inline-flex gap-1.5">
@@ -612,7 +606,7 @@ function TrendSection({
       />
 
       <div className="rounded-xl border border-rule bg-paper p-5">
-        <TrendChart fSeries={f} hSeries={h} yuanSeries={yuan} />
+        <TrendChart fSeries={f} hSeries={h} />
         <div className="mono mt-3.5 flex items-center justify-between text-[11px] text-ink-mute">
           <span>{range} 天前</span>
           <div className="flex items-center gap-3">
@@ -621,9 +615,6 @@ function TrendSection({
             </span>
             <span className="inline-flex items-center gap-1.5">
               <span className="h-2 w-2 rounded-full bg-sage" aria-hidden />H
-            </span>
-            <span className="inline-flex items-center gap-1.5">
-              <span className="h-2 w-2 rounded-full bg-teal" aria-hidden />¥
             </span>
           </div>
           <span>今天</span>
@@ -636,54 +627,46 @@ function TrendSection({
 function TrendChart({
   fSeries,
   hSeries,
-  yuanSeries,
 }: {
   fSeries: number[];
   hSeries: number[];
-  yuanSeries: number[];
 }) {
-  const N = Math.max(fSeries.length, hSeries.length, yuanSeries.length, 1);
+  const N = Math.max(fSeries.length, hSeries.length, 1);
   const fValues = normalizeSeries(fSeries, N);
   const hValues = normalizeSeries(hSeries, N);
-  const yuanValues = normalizeSeries(yuanSeries, N);
   const W = 600;
   const H = 160;
-  const pad = { l: 32, r: 42, t: 14, b: 10 };
+  const pad = { l: 32, r: 16, t: 14, b: 10 };
   const iw = W - pad.l - pad.r;
   const ih = H - pad.t - pad.b;
   const tokenMax = Math.max(0, ...fValues, ...hValues);
-  const yuanMax = Math.max(0, ...yuanValues);
-  const noData = tokenMax <= 0 && yuanMax <= 0;
+  const noData = tokenMax <= 0;
   const max = Math.max(1, tokenMax);
-  const moneyMax = Math.max(1, yuanMax);
   // Round max up to a "nice" tick so the y-axis label reads as a clean
   // integer rather than a noisy actual maximum.
   const niceMax = niceCeil(max);
-  const niceMoneyMax = niceCeil(moneyMax);
 
   const xAt = (i: number) =>
     pad.l + (N <= 1 ? iw / 2 : (i / (N - 1)) * iw);
   const yAt = (v: number) => pad.t + (1 - v / niceMax) * ih;
-  const yMoneyAt = (v: number) => pad.t + (1 - v / niceMoneyMax) * ih;
 
-  const buildPath = (series: number[], yScale: (v: number) => number) =>
+  const buildPath = (series: number[]) =>
     series
-      .map((v, i) => `${i === 0 ? "M" : "L"} ${xAt(i)} ${yScale(v)}`)
+      .map((v, i) => `${i === 0 ? "M" : "L"} ${xAt(i)} ${yAt(v)}`)
       .join(" ");
   const buildArea = (series: number[]) => {
     const last = series.length - 1;
-    return `${buildPath(series, yAt)} L ${xAt(last)} ${yAt(0)} L ${xAt(0)} ${yAt(0)} Z`;
+    return `${buildPath(series)} L ${xAt(last)} ${yAt(0)} L ${xAt(0)} ${yAt(0)} Z`;
   };
 
-  const fPath = buildPath(fValues, yAt);
-  const hPath = buildPath(hValues, yAt);
-  const yuanPath = buildPath(yuanValues, yMoneyAt);
+  const fPath = buildPath(fValues);
+  const hPath = buildPath(hValues);
   const fArea = buildArea(fValues);
   const hArea = buildArea(hValues);
 
   const ariaLabel = noData
     ? "余额：暂无 F / H"
-    : `余额：当前 F ${fValues.at(-1) ?? 0}，H ${hValues.at(-1) ?? 0}，共可花 ¥${yuanValues.at(-1) ?? 0}`;
+    : `余额：当前 F ${fValues.at(-1) ?? 0}，H ${hValues.at(-1) ?? 0}`;
 
   // 7d view shows dots (each day matters); 30d view drops them so the
   // line itself is the signal and dots don't crowd into noise.
@@ -741,18 +724,6 @@ function TrendChart({
       >
         {niceMax}
       </text>
-      <text
-        x={W - pad.r + 6}
-        y={yMoneyAt(niceMoneyMax)}
-        dy="0.32em"
-        textAnchor="start"
-        fontSize="10"
-        fill="var(--ink-mute)"
-        fontFamily="var(--font-mono, ui-monospace)"
-      >
-        ¥{niceMoneyMax}
-      </text>
-
       {noData ? (
         <text
           x={pad.l + iw / 2}
@@ -790,16 +761,6 @@ function TrendChart({
             strokeLinecap="round"
             vectorEffect="non-scaling-stroke"
           />
-          <path
-            d={yuanPath}
-            stroke="var(--teal)"
-            strokeWidth={1.8}
-            fill="none"
-            strokeLinejoin="round"
-            strokeLinecap="round"
-            vectorEffect="non-scaling-stroke"
-          />
-
           {/* dots — only on 7d view */}
           {showDots && (
             <>
@@ -823,17 +784,6 @@ function TrendChart({
                   fill="var(--tomato)"
                 >
                   <title>{`${N - 1 - i} 天前 · F ${v}`}</title>
-                </circle>
-              ))}
-              {yuanValues.map((v, i) => (
-                <circle
-                  key={`yuan-${i}`}
-                  cx={xAt(i)}
-                  cy={yMoneyAt(v)}
-                  r={dotR}
-                  fill="var(--teal)"
-                >
-                  <title>{`${N - 1 - i} 天前 · 可花 ¥${v}`}</title>
                 </circle>
               ))}
             </>
