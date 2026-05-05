@@ -134,6 +134,7 @@ export default function KanbanPage() {
     cardId: string;
     fromCol: ColId;
     anchor: { x: number; y: number };
+    pointerId: number;
   } | null>(null);
 
   const hitTestCol = (x: number, y: number): ColId | null => {
@@ -286,8 +287,13 @@ export default function KanbanPage() {
             <MobileCardItem
               key={c.id}
               card={c}
-              onLongPress={(x, y) =>
-                setMoveMenu({ cardId: c.id, fromCol: activeTab, anchor: { x, y } })
+              onLongPress={(x, y, pointerId) =>
+                setMoveMenu({
+                  cardId: c.id,
+                  fromCol: activeTab,
+                  anchor: { x, y },
+                  pointerId,
+                })
               }
               onTap={() => openEdit(c, activeTab)}
             />
@@ -311,6 +317,7 @@ export default function KanbanPage() {
           card={movingCard}
           fromCol={moveMenu.fromCol}
           anchor={moveMenu.anchor}
+          pointerId={moveMenu.pointerId}
           onMove={handleMobileMove}
           onCancel={() => setMoveMenu(null)}
         />
@@ -554,22 +561,23 @@ function MobileCardItem({
   onTap,
 }: {
   card: KanbanCard;
-  onLongPress: (x: number, y: number) => void;
+  onLongPress: (x: number, y: number, pointerId: number) => void;
   onTap: () => void;
 }) {
+  const ref = useRef<HTMLDivElement>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const startPos = useRef<{ x: number; y: number } | null>(null);
+  const startPos = useRef<{ x: number; y: number; pointerId: number } | null>(null);
   const fired = useRef(false);
 
-  const start = (x: number, y: number) => {
+  const start = (x: number, y: number, pointerId: number) => {
     fired.current = false;
-    startPos.current = { x, y };
+    startPos.current = { x, y, pointerId };
     timer.current = setTimeout(() => {
       fired.current = true;
       if (typeof navigator !== "undefined" && "vibrate" in navigator) {
         navigator.vibrate?.(20);
       }
-      onLongPress(x, y);
+      onLongPress(x, y, pointerId);
     }, LONG_PRESS_MS);
   };
 
@@ -581,9 +589,17 @@ function MobileCardItem({
   };
 
   const settle = (didLift: boolean) => {
+    const pointerId = startPos.current?.pointerId;
     const wasArmed = !!startPos.current && !fired.current;
     clearTimer();
     startPos.current = null;
+    if (pointerId !== undefined) {
+      try {
+        ref.current?.releasePointerCapture(pointerId);
+      } catch {
+        /* already released */
+      }
+    }
     if (didLift && wasArmed) onTap();
   };
 
@@ -600,13 +616,22 @@ function MobileCardItem({
 
   return (
     <div
-      onPointerDown={(e) => start(e.clientX, e.clientY)}
-      onPointerMove={(e) => checkDrift(e.clientX, e.clientY)}
+      ref={ref}
+      onPointerDown={(e) => {
+        if (e.pointerType === "mouse" && e.button !== 0) return;
+        e.preventDefault();
+        ref.current?.setPointerCapture(e.pointerId);
+        start(e.clientX, e.clientY, e.pointerId);
+      }}
+      onPointerMove={(e) => {
+        if (startPos.current?.pointerId !== e.pointerId) return;
+        checkDrift(e.clientX, e.clientY);
+      }}
       onPointerUp={() => settle(true)}
       onPointerCancel={() => settle(false)}
       onPointerLeave={() => settle(false)}
       onContextMenu={(e) => {
-        if (fired.current) e.preventDefault();
+        e.preventDefault();
       }}
       role="button"
       tabIndex={0}
@@ -661,12 +686,14 @@ function RadialMoveMenu({
   card,
   fromCol,
   anchor,
+  pointerId,
   onMove,
   onCancel,
 }: {
   card: KanbanCard;
   fromCol: ColId;
   anchor: { x: number; y: number };
+  pointerId: number;
   onMove: (toCol: ColId) => void;
   onCancel: () => void;
 }) {
@@ -685,6 +712,7 @@ function RadialMoveMenu({
   useEffect(() => {
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
+    const openedAt = Date.now();
 
     const setActiveSync = (a: ColId | null) => {
       activeRef.current = a;
@@ -692,6 +720,7 @@ function RadialMoveMenu({
     };
 
     const handleMove = (e: PointerEvent) => {
+      if (e.pointerId !== pointerId) return;
       e.preventDefault();
       const x = e.clientX;
       const y = e.clientY;
@@ -718,13 +747,22 @@ function RadialMoveMenu({
       setActiveSync(target === fromCol ? null : target);
     };
 
-    const handleUp = () => {
+    const handleUp = (e: PointerEvent) => {
+      if (e.pointerId !== pointerId) return;
       const target = activeRef.current;
       if (target && target !== fromCol) onMove(target);
       else onCancel();
     };
 
-    const handleCancel = () => onCancel();
+    const handleCancel = (e: PointerEvent) => {
+      if (e.pointerId !== pointerId) return;
+      if (Date.now() - openedAt < 160) return;
+      onCancel();
+    };
+
+    const handleContextMenu = (e: MouseEvent) => {
+      e.preventDefault();
+    };
 
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onCancel();
@@ -733,6 +771,7 @@ function RadialMoveMenu({
     window.addEventListener("pointermove", handleMove, { passive: false });
     window.addEventListener("pointerup", handleUp);
     window.addEventListener("pointercancel", handleCancel);
+    window.addEventListener("contextmenu", handleContextMenu);
     window.addEventListener("keydown", handleKey);
 
     return () => {
@@ -740,10 +779,11 @@ function RadialMoveMenu({
       window.removeEventListener("pointermove", handleMove);
       window.removeEventListener("pointerup", handleUp);
       window.removeEventListener("pointercancel", handleCancel);
+      window.removeEventListener("contextmenu", handleContextMenu);
       window.removeEventListener("keydown", handleKey);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ax, ay, fromCol]);
+  }, [ax, ay, fromCol, pointerId]);
 
   // Chip positions (absolute viewport coords)
   const chips: { id: ColId; cx: number; cy: number }[] = [
