@@ -45,7 +45,7 @@ https://tokmato.nihildigit.dev
 
 浏览器和 PWA 走 Web Push：番茄启动时客户端经 server action 向 Upstash QStash 推一条延时 25 分钟的回调消息；到时 QStash 回调 server，由 web-push 向用户已注册的订阅投递 VAPID 签发的载荷。整条链路在服务端自我递推下一条延时消息（缓冲结束 1 分钟），使用者关闭浏览器或锁屏后仍可如期收到提醒。
 
-Android 上从 v2.4 起多了一条原生 FCM 通道。Web Push 协议层缺少 high-priority 的开关，到点的通知会被 Android 的 Doze 模式压到下次亮屏才放出来，延迟可达数分钟到十几分钟；原生 FCM 走 firebase-admin 发 priority:high，能透 Doze 即时弹。配套出一个 Capacitor 套壳的 Android APK，装上后 Settings 里点开启推送即注册原生通道。两条通道并行投递、互不替代——浏览器 / PWA 用户照旧拿 Web Push，装了 APK 的设备额外多一份原生投递。
+Android 上从 v2.4 起多了一条原生 FCM 通道。Web Push 协议层缺少 high-priority 的开关，到点的通知会被 Android 的 Doze 模式压到下次亮屏才放出来，延迟可达数分钟到十几分钟；原生 FCM 走 firebase-admin 发 priority:high，能透 Doze 即时弹。v3.x 之后这条通道由 `mobile/` 下的 Expo / RN 应用承载（早期为 Capacitor WebView 套壳，已退场），通过 `expo-notifications` 注册 FCM token。两条通道并行投递、互不替代——浏览器 / PWA 用户照旧拿 Web Push，装了 APK 的设备额外多一份原生投递。
 
 未使用浏览器端 setInterval 或 setTimeout 的原因是这些计时器在标签页隐藏或设备休眠时被严格限速，无法保证在番茄结束的瞬间触发；即便授予了 Notification 权限，浏览器闲置态下的可达性也接近不可用。把调度迁至云端后，提醒可达性与浏览器开启状态解耦。
 
@@ -53,9 +53,9 @@ Android 上从 v2.4 起多了一条原生 FCM 通道。Web Push 协议层缺少 
 
 ## Android APK
 
-每个 v* tag 触发 GitHub Actions 自动构建 arm64-v8a 的 release-signed APK，附在对应的 GitHub Release 下面。最新版：[releases/latest](https://github.com/NihilDigit/tokmato/releases/latest)。
+每个 v* tag 触发 GitHub Actions 通过 EAS Build 出一个 release-signed APK，附在对应的 GitHub Release 下面。最新版：[releases/latest](https://github.com/NihilDigit/tokmato/releases/latest)。
 
-不上 Play Store，sideload 自用。装上后跟网页 PWA 体验等价，唯一差别是推送走原生 FCM 而非 Web Push。
+不上 Play Store，sideload 自用。`mobile/` 是独立的 Expo / RN 工程，与 web 共享 `shared/` 下的 Zustand store / Zod schema / 类型定义；服务端通过 `app/api/rpc/*` 给 RN 客户端提供与 web server actions 同形态的 REST 接口。原生通知走 FCM 而非 Web Push。
 
 ## 跨端只读 awareness
 
@@ -76,7 +76,7 @@ Android 上从 v2.4 起多了一条原生 FCM 通道。Web Push 协议层缺少 
 ## 功能
 
 - 番茄钟（25 + 1 缓冲），基于 wall-clock 计时，标签页隐藏或设备休眠不漂移
-- 双通道推送：Web Push（浏览器 / PWA）+ 原生 FCM（Android APK），后者 priority:high 绕 Doze
+- 双通道推送：Web Push（浏览器 / PWA）+ 原生 FCM（Expo / RN APK），后者 priority:high 绕 Doze
 - 多设备自动同步（GitHub 登录），id 去重合并而非全量覆盖
 - 跨端只读 awareness：一端运行时其他端自动只读镜像
 - 看板：四象限 + 收件箱，移动端径向手势移动
@@ -86,9 +86,9 @@ Android 上从 v2.4 起多了一条原生 FCM 通道。Web Push 协议层缺少 
 
 ## 技术栈
 
-Next.js 16 / React 19 / Tailwind 4 / shadcn/ui / Zustand / Auth.js v5 / Upstash Redis & QStash / web-push / firebase-admin / Capacitor 8 / Bun。Vercel 部署 web，GitHub Actions 出 APK。
+Next.js 16 / React 19 / Tailwind 4 / shadcn/ui / Zustand / Auth.js v5 / Upstash Redis & QStash / web-push / firebase-admin / Expo SDK 52 + RN 0.76 / Bun。Vercel 部署 web，GitHub Actions 通过 EAS Build 出 APK。
 
-设计规范见 `.impeccable.md`，工程文档见 `CLAUDE.md`，Android 套壳的演化记录见 `capacitor/EXPERIMENT.md`。
+设计规范见 `.impeccable.md`，工程文档见 `CLAUDE.md`。RN 应用的入口与构建说明见 `mobile/README.md`。
 
 ## 开发
 
@@ -113,7 +113,7 @@ EOF
 git push origin main v2.x
 ```
 
-每个 v* tag 触发两条 workflow：一条把 web 部署到 Vercel，一条用 GitHub Actions runner build arm64-v8a Android APK 并发布 GitHub Release（release notes 取自 tag 注解，APK 自动 attach）。`NEXT_PUBLIC_APP_VERSION` 在 build 阶段注入，UI 版本号随 tag 自动更新。
+每个 v* tag 触发两条 workflow：一条把 web 部署到 Vercel，一条用 GitHub Actions runner 通过 EAS Build 出 Android APK 并发布 GitHub Release（release notes 取自 tag 注解，APK 自动 attach）。`NEXT_PUBLIC_APP_VERSION` 在 build 阶段注入，UI 版本号随 tag 自动更新。
 
 ## 许可
 

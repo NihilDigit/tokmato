@@ -16,7 +16,7 @@ This repo uses Next.js 16 with React 19. Several APIs differ from anything in pr
 
 ```
 tokmato/
-├── app/, components/, lib/   ← Next.js 16 web app — unchanged
+├── app/, components/, lib/   ← Next.js 16 web app
 ├── shared/                   ← platform-agnostic Zustand store + Zod
 │                               schema + domain types/utils. Re-exported
 │                               from lib/* via thin shims so existing
@@ -28,8 +28,6 @@ tokmato/
 ├── lib/rpc-auth.ts           ← unified auth: cookie session OR
 │                               `Authorization: Bearer <jwt>` (signed
 │                               with AUTH_SECRET + RPC_BEARER_SALT).
-├── capacitor/                ← legacy Android WebView shell. Pending
-│                               retirement once mobile/ ships v3.x.
 └── mobile/                   ← Expo SDK 52 RN app. See mobile/README.md
                                 for boot, auth flow, EAS build pipeline.
 ```
@@ -39,6 +37,11 @@ The shared layer means new persisted-state fields go in **two** places:
 strict Zod). Web's `app/actions/sync.ts` and the RN client's
 `lib/cloud-sync.ts` ship the same projection; merge logic lives in
 `applyMergedSnapshot` and is platform-agnostic.
+
+The legacy `capacitor/` WebView shell retired in v3.x — RN under
+`mobile/` is the only Android delivery now. `lib/push-client.ts` is
+web-only (no more `window.Capacitor` branches); native FCM
+registration moved to `mobile/lib/push.ts` via `expo-notifications`.
 
 The design constitution lives in `.impeccable.md` — **must-read**. It sets brand voice, palette, info density rules ("杂志调、app 骨"), and what to never do (no marketing副文 / no fake CJK italic / no naked hex).
 
@@ -60,35 +63,25 @@ bunx vercel env add NAME production --value "..." -y  # Push a single var
 # Add shadcn primitives
 bunx --bun shadcn@latest add <component>
 
-# Capacitor APK (Android wrapper, builds locally for iteration; CI handles releases)
-cd capacitor
+# Mobile (Expo / RN, see mobile/README.md for the full pipeline)
+cd mobile
 bun install
-bunx cap sync android                 # propagate web/ + plugins into android/
-cd android
-. ~/.local/share/tokmato-android/credentials.env  # for release builds
-./gradlew assembleRelease             # signed release APK in app/build/outputs/apk/release/
-./gradlew assembleDebug               # unsigned debug APK if you just want to iterate
+bunx expo start                        # dev server with QR
+bunx expo run:android                  # build + install dev APK on emulator
+EAS_NO_VCS=1 bunx eas-cli build \
+  --platform android --profile production-apk --local \
+  --non-interactive --output ../tokmato-local.apk   # signed release APK
 ```
 
-Production deploys are triggered by pushing a `v*` tag — `.github/workflows/release-deploy.yml` builds and ships via `vercel deploy --prebuilt --prod`. Don't deploy from a local working tree if the goal is a tagged release; tag and push instead. The workflow injects `NEXT_PUBLIC_APP_VERSION = ${github.ref_name}` into the build env so `lib/version.ts` (and hence the UI's version label) tracks the tag automatically — never hand-edit that file.
-
-## v3 transition status
-
-The RN migration plan in `MIGRATION_RN.md` ships in 7 commits across
-phases 0-6. Currently `capacitor/` and `mobile/` coexist; the
-`v3.x` series is the cutover window:
-
-- v3.0: first mobile/ EAS build attached to a release. Both APKs
-  go out (release-apk.yml = capacitor, release-mobile.yml = expo).
-- v3.x: device-verify mobile/ across the parity checklist in
-  `mobile/README.md` ("When to retire `capacitor/`"). At least one
-  full pomodoro string + lock-screen push delivery + cloud sync
-  round-trip must work on the EAS APK.
-- v3.x+1 (only after parity confirmed): delete capacitor/, delete
-  release-apk.yml, rename release-mobile.yml → release-apk.yml.
-
-Before v3.x+1 ships, **don't** depend on mobile/ being complete —
-9 sheets are stubbed (see `mobile/components/sheets/_TODO_phase5b.md`).
+Production deploys are triggered by pushing a `v*` tag —
+`.github/workflows/release-deploy.yml` ships the web build via
+`vercel deploy --prebuilt --prod`, and `.github/workflows/release-apk.yml`
+builds the mobile APK via EAS (`--local`, on the GH runner) and
+attaches it to the auto-published GitHub Release. Don't deploy from a
+local working tree if the goal is a tagged release; tag and push
+instead. The workflow injects `NEXT_PUBLIC_APP_VERSION = ${github.ref_name}`
+into the build env so `lib/version.ts` (and hence the UI's version
+label) tracks the tag automatically — never hand-edit that file.
 
 ## Release authoring
 
@@ -130,8 +123,8 @@ Manual, semantic. Auto-generated commit lists are flow-of-thought; semantic note
 - **Vercel Marketplace Upstash Redis** for cross-device state sync (env vars `KV_REST_API_URL` / `KV_REST_API_TOKEN`, with `UPSTASH_REDIS_REST_URL/TOKEN` as fallback). Wrapper at `lib/kv.ts`; key namespace via `kvKey.userState(userId)` / `kvKey.pushSubscriptions(userId)` (Hash) / `kvKey.fcmTokens(userId)` (Hash) / `kvKey.pushPending(userId)` / `kvKey.activeSession(userId)`.
 - **Upstash QStash** (US region, `qstash-us-east-1.upstash.io`) for delayed delivery of Web Push notifications. Wrapper at `lib/qstash.ts`. Free tier 500 msg/day is plenty for a single user.
 - **`web-push`** package for VAPID-signed delivery to FCM / Mozilla Push / APNs (browser path). Wrapper at `lib/web-push.ts`.
-- **`firebase-admin`** for native FCM `priority:high` delivery to the Capacitor APK (Doze-bypass path). Wrapper at `lib/fcm.ts`.
-- **Capacitor 8** subproject at `capacitor/` builds the Android APK that consumes the native FCM transport. Independent `package.json` + `node_modules`; only the build pipeline cares about it.
+- **`firebase-admin`** for native FCM `priority:high` delivery to the Expo / RN APK (Doze-bypass path). Wrapper at `lib/fcm.ts`.
+- **Expo SDK 52 + EAS Build** — `mobile/` is the Android RN client. `app/api/rpc/*` mirrors the web's server actions over REST so the RN client (cookie-less) can hit them with a Bearer JWT. EAS local build (signed) ships in CI.
 - **`zod`** for schema validation at trust boundaries (server actions, API routes). Persisted-snapshot schema in `lib/snapshot-schema.ts`.
 
 ### Cloud sync — auto-sync via id-dedup merge (v2.0+)
@@ -168,17 +161,20 @@ client startSession
 - **Service worker** at `public/sw.js` — only does push handling and notificationclick → focus existing tab. Do NOT add caching strategies here without thinking about how they interact with the Next.js build pipeline.
 - **Platform caveats**: iOS Safari only honors Web Push when tokmato is installed as a PWA (manifest is in place; user has to "add to home screen"). Chrome desktop needs "Continue running background apps" enabled (default on).
 
-### Native FCM transport (v2.4+, `lib/fcm.ts` + `capacitor/`)
-The Capacitor Android wrapper at `capacitor/` packages the same Next.js app into a WebView APK and registers a parallel push transport that bypasses Doze on locked screens, which Web Push cannot.
+### Native FCM transport (v3.x+, `lib/fcm.ts` + `mobile/`)
+The Expo / RN app at `mobile/` registers a parallel push transport
+(beyond Web Push) so locked-screen Android can bypass Doze. Web Push
+has no high-priority knob; native FCM does — that's the architectural
+reason `mobile/` exists.
 
 - **Transports run side by side**: `/api/push/fire` reads BOTH `tokmato:user:{id}:push:subs` (Web Push) and `tokmato:user:{id}:fcm:tokens` (FCM) — both Redis Hashes keyed by `sha1(endpoint|token).slice(0, 16)` so every device the user has registered keeps its own row. Each fire fans out in parallel across both Hashes; expired entries (web 410, FCM `messaging/registration-token-not-registered`) are HDEL'd on the fly. Chain only stops when **every** transport across both Hashes has expired.
-- **Capacitor side stores nothing locally beyond a `tokmato:fcm-token` localStorage marker**. The APK loads `https://tokmato.nihildigit.dev` directly (`server.url` mode), so all UI / state / auth / store live on the web side — Capacitor only adds the native push plugin, the WebView shell, and an `allowNavigation` whitelist for `*.github.com` so OAuth can complete in-WebView with one cookie jar.
-- **`lib/push-client.ts` branches on `window.Capacitor.isNativePlatform()`**: native path calls `Capacitor.Plugins.PushNotifications.register()` and posts the FCM token via `saveFcmToken` server action; web path stays on VAPID + `pushManager.subscribe`. Settings UI uses the same "开启推送" button for both. The native code also `Promise.resolve()`-normalizes every plugin call because the global `window.Capacitor.Plugins.*` returns sync handles while the npm-imported wrapper returns Promises — guarding against either shape keeps the same code working in both contexts.
+- **RN side**: `mobile/lib/push.ts` calls `expo-notifications`'s `getDevicePushTokenAsync()` (returns the FCM registration token on Android, matching what `lib/fcm.ts` delivers to). Token is POST'd to `app/api/rpc/save-fcm-token` over Bearer JWT, which writes the same `kvKey.fcmTokens(userId)` Hash the web stack reads. Settings has the explicit opt-in toggle.
+- **Web side push-client is web-only** now. `lib/push-client.ts` is straight VAPID + `pushManager.subscribe` — no `window.Capacitor` branches.
 - **`lib/fcm.ts` initializes firebase-admin** from `FIREBASE_SERVICE_ACCOUNT_JSON_B64` (base64-encoded service account JSON in env). Returns DISABLED when missing, EXPIRED when the FCM SDK reports `registration-token-not-registered`. Calls `getMessaging(app).send()` with `android.priority: "high"` + a `notification` block — both required to escape Doze.
-- **APK build pipeline**: `.github/workflows/release-apk.yml` runs on every `v*` tag, builds an arm64-v8a **release-signed** APK in `capacitor/android/app/build/outputs/apk/release/`, and auto-publishes a GitHub Release whose body comes from the tag's annotated message (with the SSH-signature block stripped) — APK attached. Required repo secrets: `ANDROID_GOOGLE_SERVICES_JSON_BASE64`, `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`. Local release builds: `source ~/.local/share/tokmato-android/credentials.env` (auto-generated alongside the keystore) then `gradlew assembleRelease` — the same env vars feed the gradle signing config.
+- **APK build pipeline**: `.github/workflows/release-apk.yml` runs on every `v*` tag, builds the EAS local production-apk profile in `mobile/`, signs with the keystore restored from secrets + `credentials.json` constructed inline, and attaches the APK to the auto-published GitHub Release (body = tag's annotated message, SSH signature stripped). Required repo secrets: `EXPO_TOKEN`, `ANDROID_GOOGLE_SERVICES_JSON_BASE64`, `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`. Local release builds: `cd mobile && bunx eas-cli build --platform android --profile production-apk --local --output ../tokmato-local.apk` (requires `mobile/google-services.json` on disk + EAS account login).
 - **Firebase project**: `tokmato-19547`, Android app `dev.nihildigit.tokmato`. Service account email `firebase-adminsdk-fbsvc@tokmato-19547.iam.gserviceaccount.com`.
-- **App icon**: generated via `bunx capacitor-assets generate --android` from `capacitor/assets/icon-foreground.png` (the 番茄 mark padded into the 66 % adaptive-icon safe zone) + `icon-background.png` (paper rgb(244,239,230)) + `icon-only.png` (legacy launcher fallback). Re-run after editing the source PNGs to refresh every `mipmap-*` density.
-- **Doze and high-priority Web Push**: Web Push has no high-priority knob; native FCM does. That's the only architectural reason this Capacitor shell exists. Everything else (UI, auth, sync, store) is the same web codebase. See `capacitor/EXPERIMENT.md` for the migration history.
+- **EAS file filtering**: `mobile/.easignore` overrides the root `.gitignore` so EAS Build includes `mobile/google-services.json` in its archive (the root .gitignore still keeps the file out of git). Without this, `expo prebuild` inside the EAS sandbox fails with ENOENT for the Firebase config.
+- **App icon**: source PNGs in `mobile/assets/` (`icon.png`, `icon-foreground.png`, `splash.png`). EAS prebuild generates the per-density `mipmap-*` directories from app.json's `android.adaptiveIcon` block.
 
 ### Cross-device read-only awareness (v1.6, `app/actions/active-session.ts`)
 A single KV key (`tokmato:user:{id}:active`, 30-min TTL) holds a marker describing the in-progress pomodoro string. Other signed-in devices poll it and render a read-only mirror, naturally blocking double-fire.
@@ -218,8 +214,9 @@ The persist version is at `8` — bumping it requires a `migrate` function that 
 
 ### Page shells & sheet system
 - **Routes**: `/home`, `/journey`, `/redeem`, `/kanban`, `/settings`. `/` redirects to `/home`. Layout renders `<RemoteActiveBanner>` (sticky pill, hidden on `/home`) + `<Header>` (desktop top nav, hidden on mobile via `.desktop-only-nav`) + `<MobileTabBar>` (bottom nav, `md:hidden`).
-- **Sheets** all use `<ResponsiveSheet>` (`components/ui/responsive-sheet.tsx`) which auto-branches: bottom-sheet on mobile (Radix Sheet), centered modal on desktop (Radix Dialog). When open, it sets `body[data-sheet-open]`, which `globals.css` uses to hide the mobile tab bar so it doesn't peek through. Counter pattern supports nested sheets.
-- 9 sheet content components live in `components/sheets/` (Start / Pool / Play / Food / Settle / Notes / AddKanban / AddWish / WishRedeem). All take props + `onConfirm` and call store actions; they don't reach into the store themselves. **Never use `window.prompt`/`window.confirm` for in-app input** — wrap a sheet instead. (See `AddKanbanSheet` for the reference pattern.)
+- **Sheets** (web) all use `<ResponsiveSheet>` (`components/ui/responsive-sheet.tsx`) which auto-branches: bottom-sheet on mobile (Radix Sheet), centered modal on desktop (Radix Dialog). When open, it sets `body[data-sheet-open]`, which `globals.css` uses to hide the mobile tab bar so it doesn't peek through. Counter pattern supports nested sheets.
+- 13 sheet content components live in `components/sheets/` (Start / Pool / Play / Food / Settle / Notes / AddKanban / AddWish / WishRedeem / EditTag / EditBonus / KanbanCard / WelcomeGuide / Ledger). All take props + `onConfirm` and call store actions; they don't reach into the store themselves. **Never use `window.prompt`/`window.confirm` for in-app input** — wrap a sheet instead.
+- **RN sheets** (`mobile/components/sheets/`) wrap `@gorhom/bottom-sheet` via the local `Sheet` primitive. Same prop shape. 12 of the 13 web sheets are ported; `LedgerSheet` and `WelcomeGuideSheet` are deferred per `mobile/components/sheets/_TODO_phase5b.md` (Journey screen + web first-run cover the gap).
 
 ### Pomodoro & entertainment session lifecycle (clock-based)
 **Display time is computed every render from `Date.now() - phaseStartedAt`.** Never decrement a counter via `setInterval` — that drifts under tab throttling and resets on remount. The 250 ms tick only triggers a re-render; the actual time math reads wall-clock.

@@ -28,6 +28,7 @@ import {
   pointerToTarget,
 } from "../../components/RadialMoveMenu";
 import { AddKanbanSheet } from "../../components/sheets/AddKanbanSheet";
+import { KanbanCardSheet } from "../../components/sheets/KanbanCardSheet";
 
 const COLS: { id: KanbanColumnId; short: string; label: string }[] = [
   { id: "inbox", short: "Inbox", label: "未分类" },
@@ -53,6 +54,10 @@ export default function Kanban() {
   const [activeCol, setActiveCol] = useState<KanbanColumnId>("inbox");
   const [radial, setRadial] = useState<RadialState | null>(null);
   const [addOpen, setAddOpen] = useState(false);
+  const [editTarget, setEditTarget] = useState<{
+    card: KanbanCard;
+    col: KanbanColumnId;
+  } | null>(null);
 
   return (
     <PageShell>
@@ -128,6 +133,7 @@ export default function Kanban() {
                 key={card.id}
                 card={card}
                 fromCol={activeCol}
+                onTap={() => setEditTarget({ card, col: activeCol })}
                 onLongPressStart={(anchor) =>
                   setRadial({
                     card,
@@ -176,6 +182,12 @@ export default function Kanban() {
         onClose={() => setAddOpen(false)}
         defaultColumn={activeCol}
       />
+      <KanbanCardSheet
+        open={!!editTarget}
+        card={editTarget?.card ?? null}
+        col={editTarget?.col ?? null}
+        onClose={() => setEditTarget(null)}
+      />
     </PageShell>
   );
 }
@@ -183,12 +195,14 @@ export default function Kanban() {
 function CardRow({
   card,
   fromCol,
+  onTap,
   onLongPressStart,
   onPanUpdate,
   onPanEnd,
 }: {
   card: KanbanCard;
   fromCol: KanbanColumnId;
+  onTap: () => void;
   onLongPressStart: (anchor: { x: number; y: number }) => void;
   onPanUpdate: (pointer: { x: number; y: number }) => void;
   onPanEnd: () => void;
@@ -196,8 +210,12 @@ function CardRow({
   void fromCol;
   const theme = useTheme();
 
-  // Long-press starts the radial; pan keeps it tracking; release commits.
-  // Both run on JS so they can call setState in the parent.
+  // Tap → edit; long-press starts the radial; pan keeps it tracking;
+  // release commits. All on JS so they can call setState in the parent.
+  const tap = Gesture.Tap().runOnJS(true).onEnd(() => {
+    onTap();
+  });
+
   const longPress = Gesture.LongPress()
     .minDuration(360)
     .maxDistance(20)
@@ -218,7 +236,8 @@ function CardRow({
       onPanEnd();
     });
 
-  const composed = Gesture.Simultaneous(longPress, pan);
+  // Tap loses to long-press so a held finger doesn't double-fire.
+  const composed = Gesture.Simultaneous(longPress, pan, tap);
 
   return (
     <GestureDetector gesture={composed}>

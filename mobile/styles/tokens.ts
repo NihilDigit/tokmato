@@ -9,7 +9,36 @@
  * inline.
  */
 
-const lightPalette = {
+type Palette = {
+  paper: string;
+  paper2: string;
+  paper3: string;
+  ink: string;
+  ink2: string;
+  ink3: string;
+  inkMute: string;
+  rule: string;
+  rule2: string;
+  tomato: string;
+  tomatoDeep: string;
+  tomatoSoft: string;
+  sage: string;
+  sageDeep: string;
+  sageSoft: string;
+  gold: string;
+  goldSoft: string;
+  teal: string;
+  tealDeep: string;
+  tealSoft: string;
+  plum: string;
+  ocean: string;
+  moss: string;
+  amber: string;
+  rose: string;
+  slate: string;
+};
+
+const lightPalette: Palette = {
   paper: "#f4efe6",
   paper2: "#eae3d5",
   paper3: "#ddd4c2",
@@ -38,9 +67,9 @@ const lightPalette = {
   amber: "#b87a32",
   rose: "#b15a6a",
   slate: "#5e6976",
-} as const;
+};
 
-const darkPalette = {
+const darkPalette: Palette = {
   paper: "#1a1614",
   paper2: "#221c18",
   paper3: "#2c2520",
@@ -69,7 +98,7 @@ const darkPalette = {
   amber: "#ddae65",
   rose: "#d49aa6",
   slate: "#9ba6b3",
-} as const;
+};
 
 /**
  * Fluid scale port — web uses `clamp(min, vw, max)`. RN replays this
@@ -110,7 +139,12 @@ export const layout = {
   borderRadiusLarge: 16,
 } as const;
 
-export const shadows = {
+type ShadowSet = {
+  soft: { color: string; radius: number; offsetY: number };
+  lift: { color: string; radius: number; offsetY: number };
+};
+
+export const shadows: { light: ShadowSet; dark: ShadowSet } = {
   light: {
     soft: { color: "rgba(26,22,20,0.06)", radius: 24, offsetY: 8 },
     lift: { color: "rgba(26,22,20,0.12)", radius: 48, offsetY: 24 },
@@ -119,7 +153,7 @@ export const shadows = {
     soft: { color: "rgba(0,0,0,0.4)", radius: 24, offsetY: 8 },
     lift: { color: "rgba(0,0,0,0.5)", radius: 48, offsetY: 24 },
   },
-} as const;
+};
 
 /**
  * Font stacks — note `kaiti` is intentionally separate. Web uses
@@ -139,10 +173,10 @@ export const fonts = {
 
 export type Theme = {
   name: "light" | "dark";
-  color: typeof lightPalette;
+  color: Palette;
   type: typeof typeScale;
   layout: typeof layout;
-  shadows: (typeof shadows)["light"];
+  shadows: ShadowSet;
   fonts: typeof fonts;
 };
 

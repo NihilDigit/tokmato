@@ -110,10 +110,17 @@ RN 拿不到 `tokmato.nihildigit.dev` 的 HttpOnly cookie。方案：
 
 **验证**：端到端流程——登录 → 番茄 → notes sheet → 加看板 → 径向移动 → 结算。中端 Android（Pixel 4a 级）systrace 看手势 60fps。
 
-### Phase 6 — Capacitor 下场
-删除 `capacitor/` 目录。更新 `README.md`、`CLAUDE.md`、移除 EXPERIMENT 引用。CI：`.github/workflows/release-apk.yml` 改成 EAS Build 出 AAB+APK。
+### Phase 6 — Capacitor 下场 ✓ 2026-05-05
+已删除 `capacitor/` 目录与 `.github/workflows/release-mobile.yml`，
+合并的新 `release-apk.yml` 走 EAS Build 出 APK。`lib/push-client.ts`
+摘掉 `window.Capacitor` 分支，纯 web 路径。`mobile/google-services.json`
+取消 gitignore（Firebase Android client config 设计就是公开），
+以便 EAS Build 通过 git VCS 直接打进 archive。`mobile/app.json`
+新增 `expo.extra.eas.projectId` 链入 `@nihildigit/tokmato` 项目。
 
-**验证**：v3.0 GitHub release 附 EAS-built APK，sideload 装得上；`tokmato.nihildigit.dev` 与迁移前 Lighthouse 五路由分数一致。
+**验证**：本地 `bunx eas-cli build --platform android --profile
+production-apk --local` 成功出 APK；CI workflow 改名后等待第一次
+v* tag 触发。
 
 ### Phase 7（可选） — iOS
 TestFlight 通过 EAS Build 出，APNs 证书流程。Apple Developer 账号 + 审核摩擦约 3-5 天。本计划不展开。
@@ -129,8 +136,7 @@ TestFlight 通过 EAS Build 出，APNs 证书流程。Apple Developer 账号 + �
 - `app/kanban/page.tsx`（径向菜单参考实现）
 - `components/home/RunningView.tsx`、`components/play/EntertainmentRunningView.tsx`（时钟逻辑参考）
 - `components/ui/responsive-sheet.tsx` + `components/sheets/*.tsx`（sheet 系统参考）
-- `lib/push-client.ts`（Capacitor 分支被 Expo 替换）
-- `capacitor/EXPERIMENT.md`（迁移动机历史）
+- `lib/push-client.ts`（v3.x 退场后纯 web 分支；FCM 注册搬到 `mobile/lib/push.ts`）
 
 ## 已确认接受的取舍
 1. Web 性能不会因此变好，目标只覆盖原生触屏与原生通知工程化收敛。

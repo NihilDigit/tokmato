@@ -26,8 +26,16 @@ const CJK_RE = /[　-鿿＀-￯]/;
 
 export type EditorialWeight = "serif" | "kaiti" | "sans" | "mono";
 
+/** Accept the JSX-natural shapes for interpolated text: a plain
+ *  string, a single number, or an array of either (the result of
+ *  inline expressions like `<EditorialText>{x} min</EditorialText>`).
+ *  Booleans / null / undefined inside the array are dropped silently
+ *  to mirror React's own rendering rules. The component flattens to a
+ *  single string before running the CJK segmenter. */
+export type EditorialChild = string | number | boolean | null | undefined;
+
 export interface EditorialTextProps extends Omit<TextProps, "children"> {
-  children: string;
+  children: EditorialChild | EditorialChild[];
   weight?: EditorialWeight;
   size?: number;
   italic?: boolean;
@@ -36,6 +44,21 @@ export interface EditorialTextProps extends Omit<TextProps, "children"> {
    *  string. Useful when the string is pure CJK and you want to skip
    *  the regex split overhead. */
   uniform?: boolean;
+}
+
+function flatten(children: EditorialChild | EditorialChild[]): string {
+  if (Array.isArray(children)) {
+    let out = "";
+    for (const c of children) {
+      if (c === null || c === undefined || typeof c === "boolean") continue;
+      out += typeof c === "number" ? String(c) : c;
+    }
+    return out;
+  }
+  if (children === null || children === undefined || typeof children === "boolean") {
+    return "";
+  }
+  return typeof children === "number" ? String(children) : children;
 }
 
 type Segment = { text: string; isCjk: boolean };
@@ -74,9 +97,10 @@ export function EditorialText({
   ...rest
 }: EditorialTextProps) {
   const theme = useTheme();
+  const text = useMemo(() => flatten(children), [children]);
   const segments = useMemo(
-    () => (uniform ? null : segment(children)),
-    [children, uniform],
+    () => (uniform ? null : segment(text)),
+    [text, uniform],
   );
 
   const baseStyle: TextStyle = {
@@ -98,7 +122,7 @@ export function EditorialText({
               : theme.fonts.serif;
     return (
       <Text {...rest} style={[baseStyle, { fontFamily: family }, style]}>
-        {children}
+        {text}
       </Text>
     );
   }

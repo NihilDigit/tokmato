@@ -11,6 +11,7 @@
  */
 
 import { useStore, selectSnapshot } from "@tokmato/shared/store";
+import type { UserState } from "@tokmato/shared/types";
 import { rpc, getStoredJwt, RpcError } from "./rpc-client";
 
 const SAVE_DEBOUNCE_MS = 2000;
@@ -40,7 +41,9 @@ export async function loadCloudOnce(): Promise<void> {
   try {
     const out = await rpc.loadCloud();
     if (out.data) {
-      useStore.getState().applyMergedSnapshot(out.data.snapshot, out.data.savedAt);
+      useStore
+        .getState()
+        .applyMergedSnapshot(out.data.snapshot as Partial<UserState>, out.data.savedAt);
     }
   } catch (err) {
     if (err instanceof RpcError && err.code === "UNAUTHENTICATED") return;

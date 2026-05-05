@@ -16,70 +16,24 @@
  *
  * All side-effecting calls are guarded for environments where these
  * APIs simply aren't there (SSR, old Safari, in-app browsers).
+ *
+ * Note: this module previously branched on `window.Capacitor` for the
+ * legacy WebView APK transport. The Capacitor shell retired in v3.x;
+ * native Android now ships through Expo / EAS (`mobile/`) which has
+ * its own FCM registration via `expo-notifications`. This file only
+ * handles the browser path.
  */
 
 import {
   savePushSubscription,
   removePushSubscription,
-  saveFcmToken,
-  removeFcmToken,
 } from "@/app/actions/push";
 
 const SW_PATH = "/sw.js";
 const VAPID_PUBLIC = process.env.NEXT_PUBLIC_WEB_PUSH_VAPID_PUBLIC_KEY ?? "";
 
-// Capacitor injects this global into the WebView. Outside the APK
-// it's undefined and we fall back to the Web Push path.
-//
-// Note on return shapes: when the JS package `@capacitor/push-
-// notifications` is imported, every method returns a Promise. But
-// when accessed via the global `window.Capacitor.Plugins.*`, the
-// bridge returns `addListener` synchronously and may return other
-// methods sync too. We model the return as "thenable-or-direct" and
-// normalize at every call site with `Promise.resolve(...)`.
-type ListenerHandle = { remove: () => Promise<void> | void };
-type ThenableOr<T> = T | Promise<T>;
-type CapacitorBridge = {
-  isNativePlatform: () => boolean;
-  Plugins?: {
-    PushNotifications?: {
-      requestPermissions: () => ThenableOr<{ receive: "granted" | "denied" | "prompt" | "prompt-with-rationale" }>;
-      register: () => ThenableOr<void>;
-      addListener: (
-        event: "registration" | "registrationError" | "pushNotificationReceived",
-        handler: (data: { value?: string; error?: string }) => void
-      ) => ThenableOr<ListenerHandle>;
-    };
-  };
-};
-function getCapacitor(): CapacitorBridge | null {
-  if (typeof window === "undefined") return null;
-  const c = (window as unknown as { Capacitor?: CapacitorBridge }).Capacitor;
-  return c?.isNativePlatform?.() ? c : null;
-}
-
-const NATIVE_TOKEN_LS_KEY = "tokmato:fcm-token";
-
-function readNativeToken(): string | null {
-  try {
-    return window.localStorage.getItem(NATIVE_TOKEN_LS_KEY);
-  } catch {
-    return null;
-  }
-}
-function writeNativeToken(token: string | null): void {
-  try {
-    if (token) window.localStorage.setItem(NATIVE_TOKEN_LS_KEY, token);
-    else window.localStorage.removeItem(NATIVE_TOKEN_LS_KEY);
-  } catch {
-    // ignore
-  }
-}
-
 export function isPushSupported(): boolean {
   if (typeof window === "undefined") return false;
-  // Capacitor native runs through FCM; Web Push APIs aren't required.
-  if (getCapacitor()) return true;
   return (
     "Notification" in window &&
     "serviceWorker" in navigator &&
@@ -89,15 +43,6 @@ export function isPushSupported(): boolean {
 
 export function getPermission(): NotificationPermission | "unsupported" {
   if (typeof window === "undefined") return "unsupported";
-  // Native runs through FCM, not the Web Notification API. Reflect
-  // the most useful approximation: granted if we've already saved a
-  // token, default otherwise. The Settings UI uses this to choose
-  // between "未授予权限" and "权限被拒" copy after a failed enablePush
-  // call — for native, the more specific reason already comes back
-  // through the thrown error message.
-  if (getCapacitor()) {
-    return readNativeToken() ? "granted" : "default";
-  }
   if (!("Notification" in window)) return "unsupported";
   return Notification.permission;
 }
@@ -131,16 +76,11 @@ function urlBase64ToUint8Array(base64: string): ArrayBuffer {
 /**
  * Register a push transport for this device.
  *
- * Native (Capacitor): asks the OS for notification permission,
- * registers with FCM, and ships the resulting token to the server.
- * Web: registers SW, subscribes via VAPID, persists the subscription.
- *
- * Returns a truthy marker on success, null on permission denial.
+ * Registers SW, subscribes via VAPID, persists the subscription. Returns
+ * the subscription on success or null on permission denial / lack of
+ * support.
  */
-export async function enablePush(): Promise<PushSubscription | { native: true; token: string } | null> {
-  const cap = getCapacitor();
-  if (cap) return enableNativePush(cap);
-
+export async function enablePush(): Promise<PushSubscription | null> {
   if (!isPushSupported()) return null;
   if (!VAPID_PUBLIC) throw new Error("VAPID public key is not configured");
 
@@ -169,87 +109,7 @@ export async function enablePush(): Promise<PushSubscription | { native: true; t
   return subscription;
 }
 
-async function enableNativePush(
-  cap: CapacitorBridge
-): Promise<{ native: true; token: string } | null> {
-  const Push = cap.Plugins?.PushNotifications;
-  if (!Push) {
-    throw new Error("Capacitor PushNotifications plugin missing");
-  }
-  const perm = await Push.requestPermissions();
-  if (perm.receive !== "granted") {
-    // Match the web caller's contract: null on permission denial so
-    // settings shows the same "未授予权限/权限被拒" branch.
-    return null;
-  }
-  // The plugin emits 'registration' asynchronously after register();
-  // race it against the error event to avoid hanging forever and
-  // surface the underlying reason if registration fails (FCM init,
-  // missing google-services.json, network blip, etc.).
-  const result = await new Promise<{ ok: true; token: string } | { ok: false; reason: string }>((resolve) => {
-    const cleanup: Array<() => Promise<void> | void> = [];
-    const timer = setTimeout(
-      () => void finish({ ok: false, reason: "FCM register timed out after 15s" }),
-      15_000,
-    );
-    const finish = async (
-      value: { ok: true; token: string } | { ok: false; reason: string },
-    ) => {
-      clearTimeout(timer);
-      for (const fn of cleanup) {
-        try {
-          await fn();
-        } catch {
-          // best-effort cleanup
-        }
-      }
-      resolve(value);
-    };
-    // The global `Capacitor.Plugins.PushNotifications.addListener`
-    // returns the handle synchronously; only the npm-imported wrapper
-    // wraps it in Promise<handle>. Promise.resolve normalizes both
-    // shapes so we always get a thenable cleanup pointer.
-    Promise.resolve(
-      Push.addListener("registration", (data) => {
-        if (data.value) void finish({ ok: true, token: data.value });
-      }),
-    ).then((sub) => cleanup.push(sub.remove));
-    Promise.resolve(
-      Push.addListener("registrationError", (data) => {
-        const reason = data.error || "FCM registration error (no detail)";
-        void finish({ ok: false, reason });
-      }),
-    ).then((sub) => cleanup.push(sub.remove));
-    Promise.resolve()
-      .then(() => Push.register())
-      .catch((e) => {
-        const reason = e instanceof Error ? e.message : String(e);
-        void finish({ ok: false, reason: `register() threw: ${reason}` });
-      });
-  });
-  if (!result.ok) {
-    throw new Error(result.reason);
-  }
-  writeNativeToken(result.token);
-  await saveFcmToken(result.token);
-  return { native: true, token: result.token };
-}
-
 export async function disablePush(): Promise<void> {
-  const cap = getCapacitor();
-  if (cap) {
-    const token = readNativeToken();
-    writeNativeToken(null);
-    if (token) {
-      try {
-        await removeFcmToken(token);
-      } catch {
-        // ignore
-      }
-    }
-    return;
-  }
-
   if (!isPushSupported()) return;
   const registration = await navigator.serviceWorker.getRegistration();
   const sub = await registration?.pushManager.getSubscription();
@@ -271,12 +131,8 @@ export async function disablePush(): Promise<void> {
 }
 
 export async function getCurrentSubscription(): Promise<
-  PushSubscription | { native: true; token: string } | null
+  PushSubscription | null
 > {
-  if (getCapacitor()) {
-    const token = readNativeToken();
-    return token ? { native: true, token } : null;
-  }
   if (!isPushSupported()) return null;
   const registration = await navigator.serviceWorker.getRegistration();
   return (await registration?.pushManager.getSubscription()) ?? null;

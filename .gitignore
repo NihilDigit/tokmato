@@ -39,11 +39,18 @@ yarn-error.log*
 .env*
 !.env.example
 
-# Firebase / FCM credentials — accidentally landed in this repo via a
-# browser download. The Capacitor experiment lives in a sibling repo;
-# nothing in tokmato proper should ever ship Firebase config here.
-google-services.json
+# Firebase admin / service-account JSON — actual secret material that
+# signs FCM messages server-side. Never commit. Lives in env as
+# FIREBASE_SERVICE_ACCOUNT_JSON_B64 (base64-encoded) and is loaded by
+# `lib/fcm.ts`.
 firebase-service-account*.json
+
+# `mobile/google-services.json` is intentionally NOT ignored — Firebase's
+# Android client config is designed to ship inside the APK (the API key
+# is publicly visible in any signed release). Security comes from the
+# SHA-256 fingerprint check Firebase runs against the registered app,
+# not from secrecy of this file. Keeping it tracked means EAS Build
+# picks it up via VCS without an .easignore workaround.
 
 # vercel
 .vercel

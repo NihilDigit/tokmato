@@ -1,8 +1,12 @@
 /**
- * Redeem — F+H balances + time pool + wishlist redemption.
+ * Redeem — F+H balances + time pool + spending entry points.
  *
- * Wishlist add/edit deferred to Phase 5b stub — for now use the web
- * UI to create wishes; mobile only redeems them.
+ * Spending verbs map to sheets:
+ *   - 充能       → PoolSheet (F + H → time pool minutes)
+ *   - 玩点什么   → PlaySheet (start an entertainment session, deducts pool)
+ *   - 吃点好的   → FoodSheet (H spend on food)
+ *   - 兑换心愿   → WishRedeemSheet (F + H → wishlist item)
+ *   - + 添加心愿 → AddWishSheet
  */
 
 import { useState } from "react";
@@ -13,7 +17,10 @@ import { PageShell } from "../../components/PageShell";
 import { EditorialText } from "../../components/EditorialText";
 import { useTheme } from "../../lib/use-theme";
 import { PoolSheet } from "../../components/sheets/PoolSheet";
+import { PlaySheet } from "../../components/sheets/PlaySheet";
+import { FoodSheet } from "../../components/sheets/FoodSheet";
 import { WishRedeemSheet } from "../../components/sheets/WishRedeemSheet";
+import { AddWishSheet } from "../../components/sheets/AddWishSheet";
 
 export default function Redeem() {
   const theme = useTheme();
@@ -21,12 +28,19 @@ export default function Redeem() {
   const htoken = useStore((s) => s.htoken);
   const timePool = useStore((s) => s.timePool);
   const wishlist = useStore((s) => s.wishlist);
+
   const [poolOpen, setPoolOpen] = useState(false);
+  const [playOpen, setPlayOpen] = useState(false);
+  const [foodOpen, setFoodOpen] = useState(false);
+  const [addWishOpen, setAddWishOpen] = useState(false);
   const [redeemTarget, setRedeemTarget] = useState<WishlistItem | null>(null);
 
   return (
     <PageShell>
-      <ScrollView contentContainerStyle={{ gap: 28, paddingBottom: 80 }} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={{ gap: 28, paddingBottom: 80 }}
+        showsVerticalScrollIndicator={false}
+      >
         <View>
           <EditorialText weight="sans" size={11} color={theme.color.ink3}>
             REDEEM
@@ -38,32 +52,51 @@ export default function Redeem() {
           </View>
         </View>
 
-        <Pressable
-          onPress={() => setPoolOpen(true)}
-          style={{
-            paddingVertical: 14,
-            paddingHorizontal: 18,
-            borderWidth: 1,
-            borderColor: theme.color.tealDeep,
-            borderRadius: 12,
-          }}
-        >
-          <EditorialText weight="sans" size={11} color={theme.color.ink3}>
-            充能
-          </EditorialText>
-          <EditorialText weight="serif" size={20} color={theme.color.tealDeep} style={{ marginTop: 4 }}>
-            把 F·H 兑成时间池分钟
-          </EditorialText>
-        </Pressable>
+        <View style={{ gap: 10 }}>
+          <ActionCard
+            kicker="充能"
+            label="把 F·H 兑成时间池"
+            tone={theme.color.tealDeep}
+            onPress={() => setPoolOpen(true)}
+          />
+          <ActionCard
+            kicker="玩点什么"
+            label="启动一段娱乐 timer"
+            tone={theme.color.sage}
+            onPress={() => setPlayOpen(true)}
+          />
+          <ActionCard
+            kicker="吃点好的"
+            label="H 扣食物饮料"
+            tone={theme.color.gold}
+            onPress={() => setFoodOpen(true)}
+          />
+        </View>
 
         <View>
-          <EditorialText weight="sans" size={11} color={theme.color.ink3}>
-            WISHLIST
-          </EditorialText>
+          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "baseline" }}>
+            <EditorialText weight="sans" size={11} color={theme.color.ink3}>
+              WISHLIST
+            </EditorialText>
+            <Pressable
+              onPress={() => setAddWishOpen(true)}
+              style={{
+                paddingHorizontal: 12,
+                paddingVertical: 6,
+                borderRadius: 14,
+                borderWidth: 1,
+                borderColor: theme.color.rule,
+              }}
+            >
+              <EditorialText weight="sans" size={12} color={theme.color.ink2}>
+                + 添加
+              </EditorialText>
+            </Pressable>
+          </View>
           <View style={{ marginTop: 12, gap: 10 }}>
             {wishlist.length === 0 ? (
               <EditorialText weight="sans" size={13} color={theme.color.ink3}>
-                还没有心愿。在 web 端添加，移动端会同步过来。
+                还没有心愿。点击右上角添加，或在 web 端添加后等同步过来。
               </EditorialText>
             ) : (
               wishlist.map((w) => (
@@ -91,7 +124,7 @@ export default function Redeem() {
                       color={theme.color.ink3}
                       style={{ marginTop: 4 }}
                     >
-                      {w.pay} · {w.price}
+                      {`${w.pay} · ¥${w.price}`}
                     </EditorialText>
                   </View>
                   <EditorialText weight="sans" size={12} color={theme.color.tomato}>
@@ -105,6 +138,9 @@ export default function Redeem() {
       </ScrollView>
 
       <PoolSheet open={poolOpen} onClose={() => setPoolOpen(false)} />
+      <PlaySheet open={playOpen} onClose={() => setPlayOpen(false)} />
+      <FoodSheet open={foodOpen} onClose={() => setFoodOpen(false)} />
+      <AddWishSheet open={addWishOpen} onClose={() => setAddWishOpen(false)} />
       <WishRedeemSheet
         open={Boolean(redeemTarget)}
         wish={redeemTarget}
@@ -133,5 +169,38 @@ function Stat({
         {String(value)}
       </EditorialText>
     </View>
+  );
+}
+
+function ActionCard({
+  kicker,
+  label,
+  tone,
+  onPress,
+}: {
+  kicker: string;
+  label: string;
+  tone: string;
+  onPress: () => void;
+}) {
+  const theme = useTheme();
+  return (
+    <Pressable
+      onPress={onPress}
+      style={{
+        paddingVertical: 14,
+        paddingHorizontal: 18,
+        borderWidth: 1,
+        borderColor: tone,
+        borderRadius: 12,
+      }}
+    >
+      <EditorialText weight="sans" size={11} color={theme.color.ink3}>
+        {kicker}
+      </EditorialText>
+      <EditorialText weight="serif" size={20} color={tone} style={{ marginTop: 4 }}>
+        {label}
+      </EditorialText>
+    </Pressable>
   );
 }

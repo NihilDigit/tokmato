@@ -24,7 +24,9 @@
         "foregroundImage": "./assets/icon-foreground.png",
         "backgroundColor": "#f4efe6"
       },
-      "permissions": ["NOTIFICATIONS"]
+      "permissions": [
+        "NOTIFICATIONS"
+      ]
     },
     "plugins": [
       "expo-router",
@@ -35,13 +37,28 @@
           "color": "#d65a3a",
           "defaultChannel": "tokmato-default"
         }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "kotlinVersion": "1.9.25"
+          }
+        }
       ]
     ],
     "experiments": {
       "typedRoutes": true
     },
     "extra": {
-      "apiBase": "https://tokmato.nihildigit.dev"
-    }
+      "apiBase": "https://tokmato.nihildigit.dev",
+      "router": {
+        "origin": false
+      },
+      "eas": {
+        "projectId": "dbb9b33b-3485-4264-a0d5-566fa33db038"
+      }
+    },
+    "owner": "nihildigit"
   }
 }

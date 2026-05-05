@@ -1,19 +1,18 @@
 # tokmato-mobile
 
-React Native (Expo SDK 52) port of tokmato. Replaces the
-`capacitor/` WebView shell with a real native UI that:
+React Native (Expo SDK 52) port of tokmato. The native UI:
 - Drives gestures (kanban radial menu, sheet physics) on the UI
   thread via react-native-gesture-handler + reanimated.
-- Receives FCM push directly through expo-notifications (the same
-  Doze-bypass `priority:high` channel the Capacitor build proved
-  out — see `../capacitor/EXPERIMENT.md`).
+- Receives FCM push directly through expo-notifications, the same
+  Doze-bypass `priority:high` channel the legacy Capacitor build
+  proved out before retirement.
 - Reads / writes the same Zustand store as web via the
   `@tokmato/shared` workspace alias (resolved by Metro to
   `../shared/`).
 
 The web app at `tokmato.nihildigit.dev` is **not affected** by this
-subproject — Phase B of the migration plan keeps Next.js as the web
-runtime.
+subproject — Next.js stays the web runtime; this is the Android
+delivery only.
 
 ## Stack
 
@@ -51,22 +50,45 @@ Required env in `mobile/app.json` `expo.extra`:
 GitHub OAuth client_id is fetched from `/api/rpc/github-client-id`
 on first sign-in and cached in memory — the value lives in Vercel
 env as `AUTH_GITHUB_ID` (same one web's next-auth uses), no RN-side
-config needed. The OAuth App's callback list still needs to include
+config needed. The OAuth App's callback list needs
 `tokmato://auth/callback` alongside the web callback.
 
 ## Build pipeline
 
-Production APKs are built by `.github/workflows/release-mobile.yml`
-on every `v*` tag. Same secrets as the legacy
-`release-apk.yml` (Capacitor) plus `EXPO_TOKEN`. Output is attached
-to the GitHub Release alongside the Capacitor APK.
+`mobile/google-services.json` is committed (the Firebase Android
+client config is designed to ship inside the APK; security comes from
+the SHA-256 fingerprint check, not file secrecy). EAS Build picks it
+up via VCS automatically.
 
-Local production builds:
+`mobile/app.json` `expo.extra.eas.projectId` is the link to the EAS
+project (`@nihildigit/tokmato`). Created via `eas init` once locally;
+must stay committed for `eas build` to work in non-interactive CI.
+
+Production APKs are built by `.github/workflows/release-apk.yml` on
+every `v*` tag. Required secrets: `EXPO_TOKEN`,
+`ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`,
+`ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`. The workflow:
+1. Restores the keystore from secrets to `mobile/credentials/`.
+2. Constructs `mobile/credentials.json` pointing at it.
+3. Runs `eas build --platform android --profile production-apk
+   --local --non-interactive` (uses the GH runner, not Expo cloud,
+   so no EAS Build credit is consumed).
+4. Renames the APK and attaches it to the auto-published GitHub
+   Release (release notes from the annotated tag body).
+
+Local production build:
 
 ```bash
 cd mobile
-EAS_TOKEN=... eas build --platform android --profile production-apk --local
+bunx eas-cli login          # one-time; uses your expo.dev account
+bunx eas-cli build --platform android --profile production-apk \
+  --local --non-interactive --output ../tokmato-local.apk
 ```
+
+The first `eas build` invocation pulls release credentials from the
+EAS project (`credentialsSource: "remote"` per `eas.json`), so the
+keystore lives on Expo's side. Local builds don't need a local
+`credentials.json` unless you opt into `credentialsSource: "local"`.
 
 ## Auth flow
 
@@ -84,20 +106,9 @@ EAS_TOKEN=... eas build --platform android --profile production-apk --local
 The web app still uses HttpOnly cookie sessions; both transports
 hit the same `lib/rpc-auth.ts` resolver server-side.
 
-## Sheets pending Phase 5b port
+## Sheets
 
-See `components/sheets/_TODO_phase5b.md` — 9 sheets still need
-direct ports. The critical-path 5 (Start, Notes, AddKanban, Pool,
-WishRedeem) ship in this iteration.
-
-## When to retire `capacitor/`
-
-The Phase 6 plan calls for deletion. Don't delete until:
-- An EAS-built mobile/ APK has shipped on a `v3.x` tag.
-- A device test confirms parity:
-  - GitHub OAuth completes (deep link callback).
-  - Cloud sync round-trips.
-  - 5-min pomodoro + lock screen + boundary push arrives <3s.
-  - Kanban radial gesture commits a column move.
-- Then: `rm -rf capacitor/` + delete `release-apk.yml` + rename
-  `release-mobile.yml` → `release-apk.yml`.
+12 of the 13 web sheets ship as direct RN ports. `LedgerSheet` and
+`WelcomeGuideSheet` stay deferred — Journey screen renders the same
+ledger via FlashList, and mobile users typically onboard on web
+first. See `components/sheets/_TODO_phase5b.md` for the rationale.

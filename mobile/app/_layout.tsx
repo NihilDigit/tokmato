@@ -10,8 +10,6 @@
  * stark.
  */
 
-import "../styles/unistyles";
-
 import { useEffect, useState } from "react";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -24,11 +22,13 @@ import { installStorage } from "../lib/storage";
 import { attachAutoSave, loadCloudOnce } from "../lib/cloud-sync";
 import { getStoredJwt } from "../lib/rpc-client";
 import { refreshPushToken } from "../lib/push";
+import { EntertainmentRunningView } from "../components/EntertainmentRunningView";
 
 installStorage();
 
 export default function RootLayout() {
   const [hydrated, setHydrated] = useState(false);
+  const playSession = useStore((s) => s.playSession);
 
   useEffect(() => {
     let detach: (() => void) | undefined;
@@ -57,6 +57,7 @@ export default function RootLayout() {
             <Stack.Screen name="(tabs)" />
             <Stack.Screen name="sign-in" options={{ presentation: "modal" }} />
           </Stack>
+          {playSession ? <EntertainmentRunningView session={playSession} /> : null}
         </BottomSheetModalProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>

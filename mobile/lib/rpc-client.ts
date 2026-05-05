@@ -49,7 +49,7 @@ export async function clearStoredJwt(): Promise<void> {
 
 async function request<T>(
   path: string,
-  init: RequestInit & { body?: unknown },
+  init: { method?: string; body?: unknown; headers?: Record<string, string> },
 ): Promise<T> {
   const jwt = await getStoredJwt();
   const headers: Record<string, string> = {
@@ -61,8 +61,8 @@ async function request<T>(
   let res: Response;
   try {
     res = await fetch(`${apiBase()}${path}`, {
-      ...init,
-      headers: { ...headers, ...(init.headers as Record<string, string>) },
+      method: init.method ?? "GET",
+      headers: { ...headers, ...(init.headers ?? {}) },
       body: init.body !== undefined ? JSON.stringify(init.body) : undefined,
     });
   } catch (err) {
