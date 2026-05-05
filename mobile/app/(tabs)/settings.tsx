@@ -13,12 +13,14 @@ import { getStoredJwt } from "../../lib/rpc-client";
 import { rpc } from "../../lib/rpc-client";
 import { selectSnapshot } from "@tokmato/shared/store";
 import { useThemeColors } from "../../lib/use-theme";
+import { enablePush, unregisterPush } from "../../lib/push";
 
 export default function Settings() {
   const insets = useSafeAreaInsets();
   const colors = useThemeColors();
   const lastSavedAt = useStore((s) => s.lastSavedAt);
   const [signedIn, setSignedIn] = useState<boolean | null>(null);
+  const [pushEnabled, setPushEnabled] = useState(false);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -41,6 +43,25 @@ export default function Settings() {
   async function onSignOut() {
     await signOut();
     setSignedIn(false);
+  }
+
+  async function onTogglePush() {
+    setBusy(true);
+    try {
+      if (pushEnabled) {
+        await unregisterPush();
+        setPushEnabled(false);
+      } else {
+        const out = await enablePush();
+        if (out.ok) {
+          setPushEnabled(true);
+        } else {
+          Alert.alert("无法开启推送", out.reason);
+        }
+      }
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function onForceSave() {
@@ -91,6 +112,12 @@ export default function Settings() {
       <View style={{ marginTop: 32, gap: 12 }}>
         {signedIn ? (
           <>
+            <Action
+              label={pushEnabled ? "关闭推送" : "开启推送"}
+              onPress={onTogglePush}
+              disabled={busy}
+              muted={pushEnabled}
+            />
             <Action label="立即推送" onPress={onForceSave} disabled={busy} />
             <Action label="登出" onPress={onSignOut} disabled={busy} muted />
           </>

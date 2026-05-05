@@ -21,6 +21,8 @@ import { StatusBar } from "expo-status-bar";
 import { useStore } from "@tokmato/shared/store";
 import { installStorage } from "../lib/storage";
 import { attachAutoSave, loadCloudOnce } from "../lib/cloud-sync";
+import { getStoredJwt } from "../lib/rpc-client";
+import { refreshPushToken } from "../lib/push";
 
 installStorage();
 
@@ -35,6 +37,12 @@ export default function RootLayout() {
       setHydrated(true);
       await loadCloudOnce();
       detach = attachAutoSave();
+      // Silently refresh FCM token if signed in. No-op when permissions
+      // were never granted; never prompts on its own — Settings owns
+      // the explicit opt-in.
+      if (await getStoredJwt()) {
+        void refreshPushToken().catch(() => {});
+      }
     })();
     return () => detach?.();
   }, []);
