@@ -18,8 +18,8 @@
  * (Zod issues, Redis errors) stay server-side.
  */
 
-import { auth } from "@/auth";
 import { requireRedis, kvKey } from "@/lib/kv";
+import { requireUserId, RpcAuthError } from "@/lib/rpc-auth";
 import {
   MAX_SNAPSHOT_BYTES,
   persistedSnapshotSchema,
@@ -44,12 +44,13 @@ class SyncError extends Error {
 type AuthedUser = { id: string };
 
 async function getUser(): Promise<AuthedUser> {
-  const session = await auth();
-  const user = session?.user as { id?: string } | undefined;
-  if (!user?.id) {
-    throw new SyncError("UNAUTHENTICATED");
+  try {
+    const id = await requireUserId();
+    return { id };
+  } catch (err) {
+    if (err instanceof RpcAuthError) throw new SyncError("UNAUTHENTICATED");
+    throw err;
   }
-  return { id: user.id };
 }
 
 async function checkRateLimit(userId: string): Promise<void> {

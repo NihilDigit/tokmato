@@ -32,8 +32,8 @@
  */
 
 import { createHash } from "node:crypto";
-import { auth } from "@/auth";
 import { requireRedis, kvKey } from "@/lib/kv";
+import { requireUserId, RpcAuthError } from "@/lib/rpc-auth";
 import {
   isQStashConfigured,
   publishWithDelay,
@@ -76,10 +76,12 @@ class PushError extends Error {
 }
 
 async function getUserId(): Promise<string> {
-  const session = await auth();
-  const id = (session?.user as { id?: string } | undefined)?.id;
-  if (!id) throw new PushError("UNAUTHENTICATED");
-  return id;
+  try {
+    return await requireUserId();
+  } catch (err) {
+    if (err instanceof RpcAuthError) throw new PushError("UNAUTHENTICATED");
+    throw err;
+  }
 }
 
 /** Stable, short field name for a subscription within the Hash. We

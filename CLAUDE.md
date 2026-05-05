@@ -12,6 +12,34 @@ This repo uses Next.js 16 with React 19. Several APIs differ from anything in pr
 
 **tokmato** — a personal token-economy app for a single user (考研 student, ADHD-leaning). Pomodoro sessions earn FToken (Focus) and HToken (Health); tokens spend into a time pool that funds entertainment / food / wishlist redemption. Deployed to Vercel at https://tokmato.nihildigit.dev. Installable as a PWA, with Web Push notifications that fire even when the browser is closed.
 
+## Repo layout (post v3 RN migration)
+
+```
+tokmato/
+├── app/, components/, lib/   ← Next.js 16 web app — unchanged
+├── shared/                   ← platform-agnostic Zustand store + Zod
+│                               schema + domain types/utils. Re-exported
+│                               from lib/* via thin shims so existing
+│                               web imports (`@/lib/store` etc.) still work.
+│                               RN imports via `@tokmato/shared/*` (Metro
+│                               resolver aliases to ./shared/).
+├── app/api/rpc/*             ← REST mirrors of server actions for the
+│                               RN client (cookie-OR-Bearer auth).
+├── lib/rpc-auth.ts           ← unified auth: cookie session OR
+│                               `Authorization: Bearer <jwt>` (signed
+│                               with AUTH_SECRET + RPC_BEARER_SALT).
+├── capacitor/                ← legacy Android WebView shell. Pending
+│                               retirement once mobile/ ships v3.x.
+└── mobile/                   ← Expo SDK 52 RN app. See mobile/README.md
+                                for boot, auth flow, EAS build pipeline.
+```
+
+The shared layer means new persisted-state fields go in **two** places:
+`shared/store.ts` `selectSnapshot` AND `shared/snapshot-schema.ts` (the
+strict Zod). Web's `app/actions/sync.ts` and the RN client's
+`lib/cloud-sync.ts` ship the same projection; merge logic lives in
+`applyMergedSnapshot` and is platform-agnostic.
+
 The design constitution lives in `.impeccable.md` — **must-read**. It sets brand voice, palette, info density rules ("杂志调、app 骨"), and what to never do (no marketing副文 / no fake CJK italic / no naked hex).
 
 ## Commands
@@ -43,6 +71,24 @@ cd android
 ```
 
 Production deploys are triggered by pushing a `v*` tag — `.github/workflows/release-deploy.yml` builds and ships via `vercel deploy --prebuilt --prod`. Don't deploy from a local working tree if the goal is a tagged release; tag and push instead. The workflow injects `NEXT_PUBLIC_APP_VERSION = ${github.ref_name}` into the build env so `lib/version.ts` (and hence the UI's version label) tracks the tag automatically — never hand-edit that file.
+
+## v3 transition status
+
+The RN migration plan in `MIGRATION_RN.md` ships in 7 commits across
+phases 0-6. Currently `capacitor/` and `mobile/` coexist; the
+`v3.x` series is the cutover window:
+
+- v3.0: first mobile/ EAS build attached to a release. Both APKs
+  go out (release-apk.yml = capacitor, release-mobile.yml = expo).
+- v3.x: device-verify mobile/ across the parity checklist in
+  `mobile/README.md` ("When to retire `capacitor/`"). At least one
+  full pomodoro string + lock-screen push delivery + cloud sync
+  round-trip must work on the EAS APK.
+- v3.x+1 (only after parity confirmed): delete capacitor/, delete
+  release-apk.yml, rename release-mobile.yml → release-apk.yml.
+
+Before v3.x+1 ships, **don't** depend on mobile/ being complete —
+9 sheets are stubbed (see `mobile/components/sheets/_TODO_phase5b.md`).
 
 ## Release authoring
 
