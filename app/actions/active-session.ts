@@ -18,8 +18,8 @@
  * identity) against the local store's `session.startedAt`.
  */
 
-import { auth } from "@/auth";
 import { requireRedis, kvKey } from "@/lib/kv";
+import { requireUserId, RpcAuthError } from "@/lib/rpc-auth";
 import { z } from "zod";
 
 const ACTIVE_TTL_SECONDS = 30 * 60;
@@ -54,10 +54,12 @@ class ActiveSessionError extends Error {
 }
 
 async function getUserId(): Promise<string> {
-  const session = await auth();
-  const id = (session?.user as { id?: string } | undefined)?.id;
-  if (!id) throw new ActiveSessionError("UNAUTHENTICATED");
-  return id;
+  try {
+    return await requireUserId();
+  } catch (err) {
+    if (err instanceof RpcAuthError) throw new ActiveSessionError("UNAUTHENTICATED");
+    throw err;
+  }
 }
 
 export async function setActiveSession(
