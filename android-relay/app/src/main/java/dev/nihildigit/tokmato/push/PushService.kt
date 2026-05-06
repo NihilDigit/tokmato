@@ -22,15 +22,16 @@ private const val DEFAULT_OPEN_URL = "https://tokmato.nihildigit.dev/home"
 /**
  * Receives FCM messages and renders them as system notifications.
  *
- * Server lib/fcm.ts ships push payloads as:
- *   notification: { title, body }     // for tray rendering when app is killed
- *   data: { url? }                    // deep-link target for click handling
- *   android: { priority: "high" }     // Doze-bypass
+ * Server lib/fcm.ts ships data-only payloads:
+ *   data: { title, body, url, tag }
+ *   android: { priority: "high" }   // Doze-bypass
  *
- * We bypass Firebase's auto-display path by reading the payload ourselves,
- * because that lets us attach the click PendingIntent. Without our own
- * NotificationCompat build, the click would just open MainActivity which is
- * not what we want — the relay app is the relay, not the destination.
+ * Data-only is required so onMessageReceived always fires (a payload
+ * with a `notification` block makes Firebase auto-render and ignore
+ * any PendingIntent we'd want to attach). The tradeoff: if the user
+ * has force-stopped the app, the message won't render at all — the
+ * messaging service can't be woken from a stopped state. Our flow
+ * doesn't depend on running across force-stop.
  */
 class PushService : FirebaseMessagingService() {
 
@@ -59,6 +60,7 @@ class PushService : FirebaseMessagingService() {
         val title = message.notification?.title ?: message.data["title"] ?: "tokmato"
         val body = message.notification?.body ?: message.data["body"].orEmpty()
         val url = message.data["url"] ?: DEFAULT_OPEN_URL
+        val tag = message.data["tag"] ?: "tokmato"
 
         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -81,7 +83,11 @@ class PushService : FirebaseMessagingService() {
             .setAutoCancel(true)
             .build()
 
+        // Notification id keyed off `tag`, not message id: a fresh
+        // running-end push *replaces* the prior pomodoro entry instead
+        // of stacking. play-end uses a separate tag so it doesn't
+        // collide with running/buffer ones.
         val mgr = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        mgr.notify(message.messageId?.hashCode() ?: System.currentTimeMillis().toInt(), notif)
+        mgr.notify(tag.hashCode(), notif)
     }
 }

@@ -35,6 +35,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -42,6 +47,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.app.NotificationManagerCompat
 import com.google.android.gms.tasks.Task
 import com.google.firebase.messaging.FirebaseMessaging
 import dev.nihildigit.tokmato.R
@@ -66,11 +72,34 @@ fun BindScreen(onBound: (userId: String) -> Unit) {
     var errorRes by remember { mutableStateOf<Int?>(null) }
     val focusRequester = remember { FocusRequester() }
 
+    // Re-check on every recomposition the screen lands on (covers
+    // the user toggling the system permission while we're foregrounded
+    // — the activity's permission request flow only fires once on
+    // startup).
+    val notificationsEnabled = remember(ctx) {
+        NotificationManagerCompat.from(ctx).areNotificationsEnabled()
+    }
+
     LaunchedEffect(Unit) {
         focusRequester.requestFocus()
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
+        if (!notificationsEnabled) {
+            Text(
+                text = "通知权限未开启。绑定后到系统设置里开启，否则只是个空壳。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(
+                        MaterialTheme.colorScheme.primaryContainer,
+                        RoundedCornerShape(10.dp),
+                    )
+                    .padding(horizontal = 14.dp, vertical = 12.dp)
+                    .semantics { liveRegion = LiveRegionMode.Polite },
+            )
+        }
         Text(
             text = stringResource(R.string.bind_kicker),
             style = MaterialTheme.typography.labelSmall,
@@ -92,8 +121,16 @@ fun BindScreen(onBound: (userId: String) -> Unit) {
         // The code input is a single hidden BasicTextField; the four
         // visible boxes mirror its current value. This avoids the
         // multi-field focus dance that always feels jittery on Android
-        // soft keyboards.
-        Box {
+        // soft keyboards. TalkBack should hear it as a single labeled
+        // input — the visual boxes are a presentation layer and have
+        // their own semantics cleared so the reader doesn't echo each
+        // digit position as a separate node.
+        Box(
+            modifier = Modifier.semantics(mergeDescendants = true) {
+                contentDescription =
+                    "4 位配对码输入，已输入 ${code.length} 位"
+            },
+        ) {
             BasicTextField(
                 value = code,
                 onValueChange = {
@@ -116,7 +153,9 @@ fun BindScreen(onBound: (userId: String) -> Unit) {
             )
 
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clearAndSetSemantics {},
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 repeat(CODE_LENGTH) { i ->
@@ -134,6 +173,9 @@ fun BindScreen(onBound: (userId: String) -> Unit) {
                 text = stringResource(errorRes!!),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.semantics {
+                    liveRegion = LiveRegionMode.Polite
+                },
             )
         }
 

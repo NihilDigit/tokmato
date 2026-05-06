@@ -27,14 +27,41 @@ import { fcmTokenField } from "@/lib/fcm-token-field";
 
 const PAIR_CODE_TTL_SECONDS = 60;
 
+// Per-user mint quota. Five codes per minute is well above any legitimate
+// re-pair flow (mistype + retry) and well below what would let a single
+// account squat on a meaningful slice of the 10 000-code namespace.
+const MINT_RATE_LIMIT = 5;
+const MINT_RATE_WINDOW_SEC = 60;
+
 class PairError extends Error {
-  constructor(public code: "UNAUTHENTICATED" | "INVALID_PAYLOAD" | "INTERNAL") {
+  constructor(
+    public code:
+      | "UNAUTHENTICATED"
+      | "INVALID_PAYLOAD"
+      | "RATE_LIMITED"
+      | "INTERNAL",
+  ) {
     super(code);
   }
 }
 
 function pairCodeKey(code: string): string {
   return `tokmato:pair-code:${code}`;
+}
+
+async function checkMintRateLimit(
+  userId: string,
+  redis: ReturnType<typeof requireRedis>,
+): Promise<void> {
+  const bucket = Math.floor(Date.now() / 1000 / MINT_RATE_WINDOW_SEC);
+  const key = `tokmato:user:${userId}:pair-mint-rl:${bucket}`;
+  const count = await redis.incr(key);
+  if (count === 1) {
+    await redis.expire(key, MINT_RATE_WINDOW_SEC + 5);
+  }
+  if (count > MINT_RATE_LIMIT) {
+    throw new PairError("RATE_LIMITED");
+  }
 }
 
 export async function createDevicePairCode(): Promise<{
@@ -46,6 +73,7 @@ export async function createDevicePairCode(): Promise<{
   if (!session?.user?.id) throw new PairError("UNAUTHENTICATED");
   const userId = session.user.id;
   const redis = requireRedis();
+  await checkMintRateLimit(userId, redis);
 
   // Random 4-digit code with NX guard against collision. 5 retries is
   // more than enough at 0.01 % per attempt.

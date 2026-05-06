@@ -151,14 +151,24 @@ export default function SettingsPage() {
         | { ok: true; code: string; expiresAt: number }
         | { ok: false; code: string };
       if (!res.ok || !json.ok) {
-        setPairMsg("生成失败");
+        // Map server's stable error codes to actionable hints. Keep the
+        // code visible (in parens) for self-debug — single-user app, the
+        // user reading this is also the maintainer.
+        const code = "code" in json ? json.code : "";
+        if (code === "UNAUTHENTICATED" || res.status === 401) {
+          setPairMsg("会话过期，请重新登录后再试");
+        } else if (code === "RATE_LIMITED" || res.status === 429) {
+          setPairMsg("生成太频繁了，等一分钟再试");
+        } else {
+          setPairMsg(`生成失败（${code || res.status}）`);
+        }
         return;
       }
       setPairCode(json.code);
       setPairExpiresAt(json.expiresAt);
       setPairTick(json.expiresAt - Date.now());
     } catch {
-      setPairMsg("网络问题");
+      setPairMsg("网络问题，再试一次");
     } finally {
       setPairBusy(false);
     }
@@ -472,14 +482,20 @@ export default function SettingsPage() {
                 输入下方 4 位码完成绑定。
               </p>
               {pairCode ? (
-                <div className="flex flex-col gap-3 rounded-lg border border-rule bg-paper-2 px-4 py-4">
-                  <div className="flex items-baseline gap-3">
+                <output
+                  aria-label={`配对码 ${pairCode.split("").join(" ")}，${Math.ceil(pairTick / 1000)} 秒后失效`}
+                  className="flex flex-col gap-3 rounded-lg border border-rule bg-paper-2 px-4 py-4"
+                >
+                  <div className="flex items-baseline gap-3" aria-hidden="true">
                     <span className="smallcaps text-ink-3">配对码</span>
                     <span className="ml-auto text-xs text-ink-3">
                       {Math.ceil(pairTick / 1000)}s 后失效
                     </span>
                   </div>
-                  <div className="flex justify-between gap-2 font-mono">
+                  <div
+                    className="flex justify-between gap-2 font-mono"
+                    aria-hidden="true"
+                  >
                     {pairCode.split("").map((d, i) => (
                       <span
                         key={i}
@@ -489,7 +505,7 @@ export default function SettingsPage() {
                       </span>
                     ))}
                   </div>
-                </div>
+                </output>
               ) : (
                 <GhostRow
                   Icon={Smartphone}
@@ -499,7 +515,15 @@ export default function SettingsPage() {
                   onClick={handleCreatePairCode}
                 />
               )}
-              {pairMsg && <p className="text-xs text-ink-3">{pairMsg}</p>}
+              {pairMsg && (
+                <p
+                  role="status"
+                  aria-live="polite"
+                  className="text-xs text-ink-3"
+                >
+                  {pairMsg}
+                </p>
+              )}
             </div>
           </Section>
 
