@@ -1,4 +1,4 @@
-# tokmato 🍅
+# tokmato
 
 番茄 token 应用：把每日的专注产出与健康行为记为可审计的代币，再以代币兑换娱乐时间、零食或愿望清单上的物品。
 
@@ -45,17 +45,17 @@ https://tokmato.nihildigit.dev
 
 浏览器和 PWA 走 Web Push：番茄启动时客户端经 server action 向 Upstash QStash 推一条延时 25 分钟的回调消息；到时 QStash 回调 server，由 web-push 向用户已注册的订阅投递 VAPID 签发的载荷。整条链路在服务端自我递推下一条延时消息（缓冲结束 1 分钟），使用者关闭浏览器或锁屏后仍可如期收到提醒。
 
-Android 上从 v2.4 起多了一条原生 FCM 通道。Web Push 协议层缺少 high-priority 的开关，到点的通知会被 Android 的 Doze 模式压到下次亮屏才放出来，延迟可达数分钟到十几分钟；原生 FCM 走 firebase-admin 发 priority:high，能透 Doze 即时弹。v3.x 之后这条通道由 `mobile/` 下的 Expo / RN 应用承载（早期为 Capacitor WebView 套壳，已退场），通过 `expo-notifications` 注册 FCM token。两条通道并行投递、互不替代——浏览器 / PWA 用户照旧拿 Web Push，装了 APK 的设备额外多一份原生投递。
+Android 上从 v2.4 起多了一条原生 FCM 通道。Web Push 协议层缺少 high-priority 的开关，到点的通知会被 Android 的 Doze 模式压到下次亮屏才放出来，延迟可达数分钟到十几分钟；原生 FCM 走 firebase-admin 发 priority:high，能透 Doze 即时弹。v4 之前这条通道由 `mobile/` 下的 Expo / RN 应用承载（更早是 Capacitor WebView 套壳）；v4 之后改为 `android-relay/`，一个用 Jetpack Compose 写的薄壳 APK，只接 FCM 推送、点击通知 deep-link 拉起 PWA，没有 webview 也不复制 UI。两条通道并行投递、互不替代：浏览器 / PWA 用户照旧拿 Web Push，装了 relay APK 的 Android 设备额外多一份原生投递。
 
 未使用浏览器端 setInterval 或 setTimeout 的原因是这些计时器在标签页隐藏或设备休眠时被严格限速，无法保证在番茄结束的瞬间触发；即便授予了 Notification 权限，浏览器闲置态下的可达性也接近不可用。把调度迁至云端后，提醒可达性与浏览器开启状态解耦。
 
 每条消息的 sessionId 由番茄启动瞬间的时间戳派生。使用者手动跳过缓冲时 sessionId 会被重写，旧链路上残留的回调到达时与当前 sessionId 失配，按设计静默退出，无须显式取消。
 
-## Android APK
+## Android relay APK
 
-每个 v* tag 触发 GitHub Actions 通过 EAS Build 出一个 release-signed APK，附在对应的 GitHub Release 下面。最新版：[releases/latest](https://github.com/NihilDigit/tokmato/releases/latest)。
+每个 v* tag 触发 GitHub Actions 跑 `gradle assembleRelease`，签名 APK 附到对应的 GitHub Release。最新版：[releases/latest](https://github.com/NihilDigit/tokmato/releases/latest)。不上 Play Store，sideload 自用。
 
-不上 Play Store，sideload 自用。`mobile/` 是独立的 Expo / RN 工程，与 web 共享 `shared/` 下的 Zustand store / Zod schema / 类型定义；服务端通过 `app/api/rpc/*` 给 RN 客户端提供与 web server actions 同形态的 REST 接口。原生通知走 FCM 而非 Web Push。
+APK 里只有两屏：输配对码、显示绑定状态。绑定流程是网页端 Settings 生成一个 60 秒 TTL 的 4 位数字码，APK 输码上报自身的 FCM token，服务端把 token 写进对应用户的 token 表。之后服务端推送链路按 priority:high 直送，APK 收到通知按 deep-link 跳浏览器或已装的 PWA。不和 web 端共享任何 UI 代码、不维护 store 镜像、不做 OAuth。
 
 ## 跨端只读 awareness
 
@@ -69,14 +69,14 @@ Android 上从 v2.4 起多了一条原生 FCM 通道。Web Push 协议层缺少 
 
 - 应用面向单用户单账号设计，不支持多用户共享、团队协作或代理代办场景。
 - 同步策略为按 id 去重的合并，并非真正的 OT / CRDT；同一字段在多端几秒之内交叉改写仍可能丢失早一侧的修改。单用户场景下该竞态的发生概率极低。
-- Android APK 用于绕开 Doze；OEM（小米 / 华为 / OPPO / vivo）自带的更激进省电策略可能盖过 priority:high，priority:high 不是绝对保障。
+- android-relay APK 用于绕开 Doze；OEM（小米 / 华为 / OPPO / vivo）自带的更激进省电策略可能盖过 priority:high，priority:high 不是绝对保障。
 - 主要目标群体是 ADHD 倾向的考研使用者，部分交互（长按结束、径向手势看板、4am 日界）针对其注意与决策模式优化，对其他使用者可能显得冗余。
 - 数学 tag 阶梯奖（5 / 7 / 9 / 11）的阈值依据作者考研数学复习节奏手工标定，未必适用其他使用场景。
 
 ## 功能
 
 - 番茄钟（25 + 1 缓冲），基于 wall-clock 计时，标签页隐藏或设备休眠不漂移
-- 双通道推送：Web Push（浏览器 / PWA）+ 原生 FCM（Expo / RN APK），后者 priority:high 绕 Doze
+- 双通道推送：Web Push（浏览器 / PWA）+ 原生 FCM（android-relay APK），后者 priority:high 绕 Doze
 - 多设备自动同步（GitHub 登录），id 去重合并而非全量覆盖
 - 跨端只读 awareness：一端运行时其他端自动只读镜像
 - 看板：四象限 + 收件箱，移动端径向手势移动
@@ -86,9 +86,11 @@ Android 上从 v2.4 起多了一条原生 FCM 通道。Web Push 协议层缺少 
 
 ## 技术栈
 
-Next.js 16 / React 19 / Tailwind 4 / shadcn/ui / Zustand / Auth.js v5 / Upstash Redis & QStash / web-push / firebase-admin / Expo SDK 52 + RN 0.76 / Bun。Vercel 部署 web，GitHub Actions 通过 EAS Build 出 APK。
+Web：Next.js 16 / React 19 / Tailwind 4 / shadcn/ui / Zustand / Auth.js v5 / Upstash Redis & QStash / web-push / firebase-admin / Bun。Vercel 部署。
 
-设计规范见 `.impeccable.md`，工程文档见 `CLAUDE.md`。RN 应用的入口与构建说明见 `mobile/README.md`。
+Android relay：Kotlin + Jetpack Compose + Material 3 + Firebase Messaging。Gradle 构建，GitHub Actions 出签名 APK。
+
+设计规范见 `.impeccable.md`，工程文档见 `CLAUDE.md`。
 
 ## 开发
 
@@ -113,7 +115,7 @@ EOF
 git push origin main v2.x
 ```
 
-每个 v* tag 触发两条 workflow：一条把 web 部署到 Vercel，一条用 GitHub Actions runner 通过 EAS Build 出 Android APK 并发布 GitHub Release（release notes 取自 tag 注解，APK 自动 attach）。`NEXT_PUBLIC_APP_VERSION` 在 build 阶段注入，UI 版本号随 tag 自动更新。
+每个 v* tag 触发两条 workflow：一条把 web 部署到 Vercel，一条在 GitHub Actions runner 上跑 `gradle assembleRelease` 出 Android APK 并发布 GitHub Release（release notes 取自 tag 注解，APK 自动 attach）。`NEXT_PUBLIC_APP_VERSION` 在 build 阶段注入，UI 版本号随 tag 自动更新。
 
 ## 许可
 
