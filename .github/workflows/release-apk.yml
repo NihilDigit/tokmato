@@ -1,29 +1,30 @@
 name: Release APK
 
-# Runs alongside Release Deploy on every v* tag. Builds the Expo / RN
-# app under mobile/ via EAS Build (`--local`, on the GH runner) and
+# Runs alongside Release Deploy on every v* tag. Builds the
+# tokmato-relay native Android APK under android-relay/ via Gradle and
 # publishes a GitHub Release with the APK attached. The release body
 # comes from the annotated tag's message — same content `git tag -a`
 # took at tag time, no copy/paste step.
 #
-# Required repo secret:
-#   EXPO_TOKEN  Expo access token
-#               (https://expo.dev/accounts/<user>/settings/access-tokens)
+# Required repo secrets:
+#   ANDROID_KEYSTORE_BASE64              Base64-encoded release keystore.
+#   ANDROID_KEYSTORE_PASSWORD            Keystore password.
+#   ANDROID_KEY_ALIAS                    Key alias inside the keystore.
+#   ANDROID_KEY_PASSWORD                 Key password.
+#   ANDROID_GOOGLE_SERVICES_JSON_BASE64  Firebase client config (Android),
+#                                        same project/package as before.
 #
-# Signing credentials (the release keystore + passwords) live on the
-# EAS project — `eas.json` profiles default to `credentialsSource:
-# "remote"`, so EAS pulls them at build time rather than requiring CI
-# to ship them. To rotate: `eas credentials -p android` interactively.
-#
-# `mobile/google-services.json` lives in git (the Firebase Android
-# client config is designed to ship inside the APK; security comes from
-# the SHA-256 fingerprint check, not file secrecy). EAS Build picks it
-# up via VCS automatically.
+# Firebase Android client config is designed to ship inside the APK;
+# security comes from the SHA-256 fingerprint check, not file secrecy.
+# We still inject it from a secret rather than committing it so its
+# rotation is tracked in repo settings instead of git history.
 
 on:
   push:
     tags:
       - "v*"
+    branches:
+      - "relay"
 
 concurrency:
   group: release-apk-${{ github.ref_name }}
@@ -31,9 +32,9 @@ concurrency:
 
 jobs:
   build-apk:
-    name: Build mobile APK via EAS
+    name: Build tokmato-relay APK via Gradle
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/relay'
     permissions:
       # Required to create / upload assets on the GitHub Release for this tag.
       contents: write
@@ -47,49 +48,76 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-
-      - name: Setup Node 22
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-
-      - name: Setup JDK 21
+      - name: Setup JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "21"
+          java-version: "17"
 
-      - name: Install root deps (for shared/ workspace)
-        run: bun install --frozen-lockfile
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
 
-      - name: Install mobile deps
-        working-directory: mobile
-        run: bun install --frozen-lockfile
-
-      - name: Install EAS CLI
-        run: bun add -g eas-cli
-
-      - name: EAS build (local profile, APK)
-        working-directory: mobile
+      - name: Restore release keystore
         env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: |
-          # `--local` runs the build on this runner instead of Expo's
-          # cloud queue. Saves the EAS build credit; output is the
-          # same APK shape.
-          eas build --platform android --profile production-apk --local --non-interactive --output ../tokmato-mobile.apk
+          mkdir -p android-relay/app/keystore
+          echo "$KEYSTORE_B64" | base64 -d > android-relay/app/keystore/release.keystore
+          echo "Keystore restored ($(wc -c < android-relay/app/keystore/release.keystore) bytes)"
+
+      - name: Restore google-services.json
+        env:
+          GOOGLE_SERVICES_B64: ${{ secrets.ANDROID_GOOGLE_SERVICES_JSON_BASE64 }}
+        run: |
+          echo "$GOOGLE_SERVICES_B64" | base64 -d > android-relay/app/google-services.json
+          echo "google-services.json restored ($(wc -c < android-relay/app/google-services.json) bytes)"
+
+      - name: Inject signing config
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          cat >> android-relay/gradle.properties <<EOF
+          RELEASE_STORE_FILE=keystore/release.keystore
+          RELEASE_STORE_PASSWORD=$KEYSTORE_PASSWORD
+          RELEASE_KEY_ALIAS=$KEY_ALIAS
+          RELEASE_KEY_PASSWORD=$KEY_PASSWORD
+          EOF
+
+      - name: Resolve version code/name
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            # Strip the leading 'v', map maj.min.patch → versionCode.
+            TAG_NUM=${GITHUB_REF_NAME#v}
+            MAJOR=$(echo "$TAG_NUM" | awk -F. '{print $1+0}')
+            MINOR=$(echo "$TAG_NUM" | awk -F. '{print $2+0}')
+            PATCH=$(echo "$TAG_NUM" | awk -F. '{print $3+0}')
+            CODE=$((MAJOR * 10000 + MINOR * 100 + PATCH))
+            NAME="$TAG_NUM"
+          else
+            # Branch build — synthesize a versionCode from run number so
+            # consecutive APKs install over each other for sideload testing.
+            CODE=$((1 + GITHUB_RUN_NUMBER))
+            NAME="0.0.${GITHUB_RUN_NUMBER}-${GITHUB_SHA:0:7}"
+          fi
+          echo "RELAY_VERSION_CODE=$CODE" >> "$GITHUB_ENV"
+          echo "RELAY_VERSION_NAME=$NAME" >> "$GITHUB_ENV"
+          echo "Resolved versionCode=$CODE versionName=$NAME"
+
+      - name: Gradle assembleRelease
+        working-directory: android-relay
+        run: ./gradlew assembleRelease -PrelayVersionCode=$RELAY_VERSION_CODE -PrelayVersionName=$RELAY_VERSION_NAME --no-daemon
 
       - name: Stage APK with predictable name
         id: stage
         run: |
-          SRC=tokmato-mobile.apk
-          if [ ! -f "$SRC" ]; then
-            echo "::error::EAS did not produce expected APK at $SRC"
+          SRC=$(find android-relay/app/build/outputs/apk/release -name "*.apk" | head -1)
+          if [ -z "$SRC" ] || [ ! -f "$SRC" ]; then
+            echo "::error::Gradle did not produce an APK"
             exit 1
           fi
-          DEST="tokmato-${{ github.ref_name }}.apk"
+          DEST="tokmato-relay-${RELAY_VERSION_NAME}.apk"
           mv "$SRC" "$DEST"
           echo "apk_path=$DEST" >> "$GITHUB_OUTPUT"
           echo "Built $(wc -c < "$DEST") bytes -> $DEST"
@@ -97,11 +125,12 @@ jobs:
       - name: Upload as workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: tokmato-apk-${{ github.ref_name }}
+          name: tokmato-relay-apk-${{ github.ref_name }}
           path: ${{ steps.stage.outputs.apk_path }}
           retention-days: 90
 
       - name: Publish GitHub Release with APK
+        if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
@@ -116,12 +145,6 @@ jobs:
             echo "APK attached to existing release $TAG"
             exit 0
           fi
-          # `contents:body` strips the first paragraph (the subject
-          # line), keeping the structured 主要变化 / 修复 / 工程 body.
-          # Awk pass chops the SSH signature block that signed tags
-          # append after the body — git glues the BEGIN marker onto
-          # the last content line so a plain regex skip doesn't catch
-          # it. Cut at the first occurrence regardless of position.
           git tag -l --format='%(contents:body)' "$TAG" | awk '
             /-----BEGIN SSH SIGNATURE-----/ {
               sub(/-----BEGIN SSH SIGNATURE-----.*/, "")
@@ -131,8 +154,6 @@ jobs:
             { print }
           ' > /tmp/notes.md
           if [ ! -s /tmp/notes.md ]; then
-            # Lightweight tag or empty body — fall back to subject +
-            # auto-generated commit list so the release isn't blank.
             git tag -l --format='%(contents:subject)' "$TAG" > /tmp/notes.md
             echo "" >> /tmp/notes.md
             gh release create "$TAG" \

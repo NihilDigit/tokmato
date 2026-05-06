@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <!-- Don't back up the bound state — pair-code is single-use and FCM token is device-bound. -->
+    <exclude domain="sharedpref" path="relay-prefs.xml" />
+</full-backup-content>

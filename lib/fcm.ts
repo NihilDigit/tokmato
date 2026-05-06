@@ -72,6 +72,11 @@ export type FcmPayload = {
   body: string;
   /** Android notification tag — collapses repeats. */
   tag?: string;
+  /** Deep-link target for notification taps. The relay APK reads this
+   *  from the `data` block (not `notification.click_action` — that path
+   *  needs an Android intent filter and tightens our coupling to the
+   *  APK's manifest). Defaults to the home page when unset. */
+  url?: string;
 };
 
 export type FcmResult =
@@ -95,12 +100,14 @@ export async function sendFcmPush(
 ): Promise<FcmResult> {
   const a = ensureApp();
   if (!a) return { ok: false, reason: "DISABLED" };
+  const url = payload.url ?? "https://tokmato.nihildigit.dev/home";
   const message: Message = {
     token,
     notification: {
       title: payload.title,
       body: payload.body,
     },
+    data: { url },
     android: {
       priority: "high",
       notification: {

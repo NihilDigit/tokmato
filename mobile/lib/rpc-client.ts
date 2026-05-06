@@ -7,12 +7,41 @@
  * - On 401, clears the local JWT so the auth flow knows to re-prompt.
  * - Surface stable error codes — raw HTTP errors are masked to a
  *   discriminated union the UI can switch on.
+ *
+ * JWT storage: native uses expo-secure-store (Keystore-backed). Web
+ * has no SecureStore native module, so the web build falls back to
+ * localStorage. Web auth is dev-only; production native always pairs
+ * with the Keystore path.
  */
 
 import * as SecureStore from "expo-secure-store";
+import { Platform } from "react-native";
 import { apiBase } from "./api-base";
 
 const JWT_KEY = "tokmato.rpc.jwt";
+
+const jwtStore = {
+  async get(): Promise<string | null> {
+    if (Platform.OS === "web") {
+      return typeof localStorage !== "undefined" ? localStorage.getItem(JWT_KEY) : null;
+    }
+    return (await SecureStore.getItemAsync(JWT_KEY)) ?? null;
+  },
+  async set(value: string): Promise<void> {
+    if (Platform.OS === "web") {
+      if (typeof localStorage !== "undefined") localStorage.setItem(JWT_KEY, value);
+      return;
+    }
+    await SecureStore.setItemAsync(JWT_KEY, value);
+  },
+  async remove(): Promise<void> {
+    if (Platform.OS === "web") {
+      if (typeof localStorage !== "undefined") localStorage.removeItem(JWT_KEY);
+      return;
+    }
+    await SecureStore.deleteItemAsync(JWT_KEY);
+  },
+};
 
 export type RpcErrorCode =
   | "UNAUTHENTICATED"
@@ -36,15 +65,15 @@ export class RpcError extends Error {
 }
 
 export async function getStoredJwt(): Promise<string | null> {
-  return (await SecureStore.getItemAsync(JWT_KEY)) ?? null;
+  return jwtStore.get();
 }
 
 export async function setStoredJwt(jwt: string): Promise<void> {
-  await SecureStore.setItemAsync(JWT_KEY, jwt);
+  await jwtStore.set(jwt);
 }
 
 export async function clearStoredJwt(): Promise<void> {
-  await SecureStore.deleteItemAsync(JWT_KEY);
+  await jwtStore.remove();
 }
 
 async function request<T>(

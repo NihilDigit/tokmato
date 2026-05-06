@@ -1,8 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // Allow dev requests from 127.0.0.1 (some browsers/test harnesses normalize to it).
-  allowedDevOrigins: ["127.0.0.1", "localhost"],
+  // Allow dev requests from 127.0.0.1 (some browsers/test harnesses normalize to it)
+  // and 10.0.2.2 (Android emulator's loopback to the host machine).
+  allowedDevOrigins: ["127.0.0.1", "localhost", "10.0.2.2", "10.62.72.18"],
 };
 
 export default nextConfig;

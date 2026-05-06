@@ -32,6 +32,7 @@
  */
 
 import { createHash } from "node:crypto";
+import { fcmTokenField } from "@/lib/fcm-token-field";
 import { requireRedis, kvKey } from "@/lib/kv";
 import { requireUserId, RpcAuthError } from "@/lib/rpc-auth";
 import {
@@ -150,11 +151,6 @@ export async function removePushSubscription(
 
 const fcmTokenSchema = z.string().min(40).max(500);
 
-/** Field name for an FCM token in the per-user Hash. Same shape as
- *  `endpointField` for web push subs — sha1 truncated to 16 hex chars. */
-function fcmTokenField(token: string): string {
-  return createHash("sha1").update(token).digest("hex").slice(0, 16);
-}
 
 function pendingKeyForKind(
   userId: string,

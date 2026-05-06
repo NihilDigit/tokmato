@@ -81,24 +81,29 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true, skipped: "no-subscription" });
   }
 
-  // Deliver the notification for this boundary.
+  // Deliver the notification for this boundary. `url` is consumed by
+  // tokmato-relay's deep-link handler; web push ignores it.
+  const homeUrl = "https://tokmato.nihildigit.dev/home";
   const payload =
     kind === "running-end"
       ? {
           title: "番茄完成",
           body: `第 ${count} 个番茄结束，进入 1 分钟缓冲`,
           tag: "tokmato-pomodoro",
+          url: homeUrl,
         }
       : kind === "buffer-end"
       ? {
           title: "缓冲结束",
           body: `第 ${count + 1} 个番茄开始`,
           tag: "tokmato-pomodoro",
+          url: homeUrl,
         }
       : {
           title: "娱乐时间到了",
           body: "时间池里的份额已经用完",
           tag: "tokmato-play",
+          url: homeUrl,
         };
 
   // Fan out across both transports in parallel. Web Push for browsers/
