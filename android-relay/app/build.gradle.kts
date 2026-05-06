@@ -84,6 +84,11 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
+    // Pin fragment to a version that satisfies the
+    // InvalidFragmentVersionForActivityResult lint check. Transitive
+    // resolution otherwise picks up an older fragment via core/activity
+    // metadata and lint -Werror trips on every release build.
+    implementation(libs.androidx.fragment.ktx)
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.graphics)
