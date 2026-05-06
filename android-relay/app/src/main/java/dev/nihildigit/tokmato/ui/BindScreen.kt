@@ -107,7 +107,7 @@ fun BindScreen(onBound: (userId: String) -> Unit) {
         )
         Text(
             text = stringResource(R.string.bind_title),
-            style = MaterialTheme.typography.displayMedium,
+            style = MaterialTheme.typography.headlineLarge,
             color = MaterialTheme.colorScheme.onSurface,
         )
         Text(

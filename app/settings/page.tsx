@@ -111,34 +111,20 @@ export default function SettingsPage() {
   const [pushBusy, setPushBusy] = useState(false);
   const [pushMsg, setPushMsg] = useState<string>("");
 
-  // tokmato-relay (Android FCM helper) pair-code state.
+  // tokmato-relay (Android FCM helper) pair-code state. The countdown
+  // tick lives inside <PairCodeCard> so its 4 Hz setState doesn't
+  // ripple through this page's 9-selector store subscription every
+  // 250 ms.
   const [pairCode, setPairCode] = useState<string | null>(null);
   const [pairExpiresAt, setPairExpiresAt] = useState(0);
   const [pairBusy, setPairBusy] = useState(false);
   const [pairMsg, setPairMsg] = useState("");
-  const [pairTick, setPairTick] = useState(0);
 
   useEffect(() => {
     setPushSupported(isPushSupported());
     if (!isPushSupported()) return;
     void getCurrentSubscription().then((sub) => setPushOn(Boolean(sub)));
   }, []);
-
-  // Drive the pair-code countdown. The interval only runs while a code
-  // is live, so on idle we don't burn ticks.
-  useEffect(() => {
-    if (!pairCode || pairExpiresAt === 0) return;
-    const id = setInterval(() => {
-      const remaining = Math.max(0, pairExpiresAt - Date.now());
-      setPairTick(remaining);
-      if (remaining === 0) {
-        setPairCode(null);
-        setPairExpiresAt(0);
-        clearInterval(id);
-      }
-    }, 250);
-    return () => clearInterval(id);
-  }, [pairCode, pairExpiresAt]);
 
   const handleCreatePairCode = async () => {
     setPairBusy(true);
@@ -166,12 +152,16 @@ export default function SettingsPage() {
       }
       setPairCode(json.code);
       setPairExpiresAt(json.expiresAt);
-      setPairTick(json.expiresAt - Date.now());
     } catch {
       setPairMsg("网络问题，再试一次");
     } finally {
       setPairBusy(false);
     }
+  };
+
+  const clearPairCode = () => {
+    setPairCode(null);
+    setPairExpiresAt(0);
   };
 
   const handleEnablePush = async () => {
@@ -477,40 +467,20 @@ export default function SettingsPage() {
           <Section title="Android 推送增强器">
             <div className="flex flex-col gap-3">
               <p className="text-sm text-ink-3 leading-relaxed">
-                Android Chrome 上的 Web Push 受 Doze 节流，锁屏几小时后通知就漏掉了。
-                tokmato-relay 是个 13 MB 的薄壳 APK，只接 FCM 高优先级推送、点击跳本站。
-                输入下方 4 位码完成绑定。
+                Android Chrome 的 Web Push 在锁屏几小时后会被节流，通知容易漏。
+                装一个原生 APK 接管这条通道。
               </p>
               {pairCode ? (
-                <output
-                  aria-label={`配对码 ${pairCode.split("").join(" ")}，${Math.ceil(pairTick / 1000)} 秒后失效`}
-                  className="flex flex-col gap-3 rounded-lg border border-rule bg-paper-2 px-4 py-4"
-                >
-                  <div className="flex items-baseline gap-3" aria-hidden="true">
-                    <span className="smallcaps text-ink-3">配对码</span>
-                    <span className="ml-auto text-xs text-ink-3">
-                      {Math.ceil(pairTick / 1000)}s 后失效
-                    </span>
-                  </div>
-                  <div
-                    className="flex justify-between gap-2 font-mono"
-                    aria-hidden="true"
-                  >
-                    {pairCode.split("").map((d, i) => (
-                      <span
-                        key={i}
-                        className="flex-1 rounded-md border border-rule bg-paper py-3 text-center text-h2 text-ink"
-                      >
-                        {d}
-                      </span>
-                    ))}
-                  </div>
-                </output>
+                <PairCodeCard
+                  code={pairCode}
+                  expiresAt={pairExpiresAt}
+                  onExpire={clearPairCode}
+                />
               ) : (
                 <GhostRow
                   Icon={Smartphone}
                   title="生成配对码"
-                  sub="60 秒内输到 APK 里。每次只能绑一台。"
+                  sub="60 秒内输到 APK 里。每个码单次有效。"
                   disabled={pairBusy}
                   onClick={handleCreatePairCode}
                 />
@@ -776,6 +746,68 @@ export default function SettingsPage() {
 }
 
 /* ───────────────────────── helpers ───────────────────────── */
+
+function PairCodeCard({
+  code,
+  expiresAt,
+  onExpire,
+}: {
+  code: string;
+  expiresAt: number;
+  onExpire: () => void;
+}) {
+  // Tick lives here so the 4 Hz setState only re-renders this card,
+  // not the entire SettingsPage tree (which carries a 9-key store
+  // subscription).
+  const [remaining, setRemaining] = useState(() =>
+    Math.max(0, expiresAt - Date.now()),
+  );
+
+  useEffect(() => {
+    let active = true;
+    const id = setInterval(() => {
+      if (!active) return;
+      const r = Math.max(0, expiresAt - Date.now());
+      setRemaining(r);
+      if (r === 0) {
+        active = false;
+        clearInterval(id);
+        onExpire();
+      }
+    }, 250);
+    return () => {
+      active = false;
+      clearInterval(id);
+    };
+  }, [expiresAt, onExpire]);
+
+  const seconds = Math.ceil(remaining / 1000);
+
+  return (
+    <output
+      aria-label={`配对码 ${code.split("").join(" ")}，${seconds} 秒后失效`}
+      className="flex flex-col gap-3 rounded-lg border border-rule bg-paper-2 px-4 py-4"
+    >
+      <div className="flex items-baseline gap-3" aria-hidden="true">
+        <span className="smallcaps text-ink-3">配对码</span>
+        <span className="ml-auto text-xs text-ink-3">{seconds}s 后失效</span>
+      </div>
+      <div
+        className="flex justify-between gap-2 font-mono"
+        aria-hidden="true"
+      >
+        {code.split("").map((d, i) => (
+          <span
+            key={i}
+            className="flex-1 rounded-md border border-rule bg-paper py-3 text-center text-h2 text-ink"
+          >
+            {d}
+          </span>
+        ))}
+      </div>
+    </output>
+  );
+}
 
 function Hairline() {
   return <div className="h-px bg-rule" />;

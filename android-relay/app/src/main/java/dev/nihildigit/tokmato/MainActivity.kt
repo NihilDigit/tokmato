@@ -131,7 +131,7 @@ private fun BoundScreen(userId: String, onRebind: () -> Unit) {
         )
         Text(
             text = stringResource(R.string.bound_title),
-            style = MaterialTheme.typography.displayMedium,
+            style = MaterialTheme.typography.headlineLarge,
             color = MaterialTheme.colorScheme.onSurface,
         )
         Text(
@@ -142,8 +142,10 @@ private fun BoundScreen(userId: String, onRebind: () -> Unit) {
 
         Spacer(Modifier.height(8.dp))
 
-        StatusRow(label = "USER", value = userId)
-        StatusRow(label = "FCM", value = AppPrefs(ctx).fcmToken?.take(24)?.plus("…") ?: "—")
+        // FCM token row removed: it was useful for self-debug while
+        // bringing relay up but reads as engineering noise to a user
+        // who's already seen the user-id row confirm the bind.
+        StatusRow(label = "用户", value = userId)
 
         Spacer(Modifier.height(16.dp))
 
