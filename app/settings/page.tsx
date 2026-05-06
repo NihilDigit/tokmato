@@ -18,6 +18,7 @@ import {
   BookOpen,
   Plus,
   Pencil,
+  Smartphone,
 } from "lucide-react";
 import { useSession, signIn, signOut } from "next-auth/react";
 import { useTheme } from "@/components/theme-provider";
@@ -110,11 +111,58 @@ export default function SettingsPage() {
   const [pushBusy, setPushBusy] = useState(false);
   const [pushMsg, setPushMsg] = useState<string>("");
 
+  // tokmato-relay (Android FCM helper) pair-code state.
+  const [pairCode, setPairCode] = useState<string | null>(null);
+  const [pairExpiresAt, setPairExpiresAt] = useState(0);
+  const [pairBusy, setPairBusy] = useState(false);
+  const [pairMsg, setPairMsg] = useState("");
+  const [pairTick, setPairTick] = useState(0);
+
   useEffect(() => {
     setPushSupported(isPushSupported());
     if (!isPushSupported()) return;
     void getCurrentSubscription().then((sub) => setPushOn(Boolean(sub)));
   }, []);
+
+  // Drive the pair-code countdown. The interval only runs while a code
+  // is live, so on idle we don't burn ticks.
+  useEffect(() => {
+    if (!pairCode || pairExpiresAt === 0) return;
+    const id = setInterval(() => {
+      const remaining = Math.max(0, pairExpiresAt - Date.now());
+      setPairTick(remaining);
+      if (remaining === 0) {
+        setPairCode(null);
+        setPairExpiresAt(0);
+        clearInterval(id);
+      }
+    }, 250);
+    return () => clearInterval(id);
+  }, [pairCode, pairExpiresAt]);
+
+  const handleCreatePairCode = async () => {
+    setPairBusy(true);
+    setPairMsg("");
+    try {
+      const res = await fetch("/api/rpc/create-device-pair-code", {
+        method: "POST",
+      });
+      const json = (await res.json()) as
+        | { ok: true; code: string; expiresAt: number }
+        | { ok: false; code: string };
+      if (!res.ok || !json.ok) {
+        setPairMsg("生成失败");
+        return;
+      }
+      setPairCode(json.code);
+      setPairExpiresAt(json.expiresAt);
+      setPairTick(json.expiresAt - Date.now());
+    } catch {
+      setPairMsg("网络问题");
+    } finally {
+      setPairBusy(false);
+    }
+  };
 
   const handleEnablePush = async () => {
     setPushBusy(true);
@@ -412,6 +460,52 @@ export default function SettingsPage() {
       </Section>
 
       <Hairline />
+
+      {/* ───────────── Android relay APK ───────────── */}
+      {session?.user && (
+        <>
+          <Section title="Android 推送增强器">
+            <div className="flex flex-col gap-3">
+              <p className="text-sm text-ink-3 leading-relaxed">
+                Android Chrome 上的 Web Push 受 Doze 节流，锁屏几小时后通知就漏掉了。
+                tokmato-relay 是个 13 MB 的薄壳 APK，只接 FCM 高优先级推送、点击跳本站。
+                输入下方 4 位码完成绑定。
+              </p>
+              {pairCode ? (
+                <div className="flex flex-col gap-3 rounded-lg border border-rule bg-paper-2 px-4 py-4">
+                  <div className="flex items-baseline gap-3">
+                    <span className="smallcaps text-ink-3">配对码</span>
+                    <span className="ml-auto text-xs text-ink-3">
+                      {Math.ceil(pairTick / 1000)}s 后失效
+                    </span>
+                  </div>
+                  <div className="flex justify-between gap-2 font-mono">
+                    {pairCode.split("").map((d, i) => (
+                      <span
+                        key={i}
+                        className="flex-1 rounded-md border border-rule bg-paper py-3 text-center text-h2 text-ink"
+                      >
+                        {d}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <GhostRow
+                  Icon={Smartphone}
+                  title="生成配对码"
+                  sub="60 秒内输到 APK 里。每次只能绑一台。"
+                  disabled={pairBusy}
+                  onClick={handleCreatePairCode}
+                />
+              )}
+              {pairMsg && <p className="text-xs text-ink-3">{pairMsg}</p>}
+            </div>
+          </Section>
+
+          <Hairline />
+        </>
+      )}
 
       {/* ───────────── Cloud sync ───────────── */}
       <Section title="云端">

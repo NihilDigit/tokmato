@@ -43,9 +43,28 @@ bunx expo start            # dev server with bundled QR
 bunx expo run:android      # build + install dev APK on emulator
 ```
 
-Required env in `mobile/app.json` `expo.extra`:
-- `apiBase`: Defaults to `https://tokmato.nihildigit.dev`. Override
-  for local dev: `bunx expo start` → press `?` → manual URL.
+Local dev against the host's Next.js:
+
+1. Run `bun run dev` in the repo root (Next.js on `:3000`).
+2. Copy `mobile/.env.example` to `mobile/.env.local` and adjust:
+   - Android emulator → `EXPO_PUBLIC_API_BASE=http://10.0.2.2:3000`
+   - iOS simulator    → `http://localhost:3000`
+   - Physical device  → `http://<host-LAN-ip>:3000` (same wifi)
+3. `bunx expo start` then `bunx expo run:android`.
+
+`process.env.EXPO_PUBLIC_API_BASE` is inlined at bundle time, so changing
+`.env.local` requires a Metro restart (`r` in the expo CLI) for the
+new value to take effect.
+
+Production builds ignore `.env.local` (the file is gitignored and
+EAS Build doesn't see it); they fall back to `app.json` `expo.extra.apiBase`.
+
+> Caveat — Metro must run under Node, not Bun. `bunx expo start` is
+> fine because expo's CLI has a `#!/usr/bin/env node` shebang. Avoid
+> `bunx --bun expo start`: jest-worker's IPC under Bun drops the
+> `fileBuffer` argument when transforming `require.context` virtual
+> modules (expo-router's `_ctx.js`), and Metro falls back to reading
+> the synthetic `app?ctx=…` path from disk → ENOENT → red box.
 
 GitHub OAuth client_id is fetched from `/api/rpc/github-client-id`
 on first sign-in and cached in memory — the value lives in Vercel
