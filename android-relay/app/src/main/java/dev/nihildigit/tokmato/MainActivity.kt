@@ -23,14 +23,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -42,11 +39,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityCompat
-import com.google.firebase.messaging.FirebaseMessaging
 import dev.nihildigit.tokmato.prefs.AppPrefs
 import dev.nihildigit.tokmato.ui.BindScreen
 import dev.nihildigit.tokmato.ui.theme.TokmatoRelayTheme
@@ -151,16 +148,15 @@ private fun BoundScreen(userId: String, onRebind: () -> Unit) {
 
         Button(
             onClick = {
-                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://tokmato.nihildigit.dev/home"))
+                // Use the configured API base so a local-dev build
+                // (`-PrelayApiBase=http://10.0.2.2:3000`) launches the
+                // emulator's host loopback instead of prod.
+                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("${BuildConfig.API_BASE}/home"))
                 ctx.startActivity(intent)
             },
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(16.dp),
             contentPadding = PaddingValues(vertical = 16.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
-            ),
         ) {
             Text(
                 text = stringResource(R.string.bound_open_web),
@@ -203,5 +199,3 @@ private fun StatusRow(label: String, value: String) {
     }
 }
 
-@Composable
-private fun stringResource(id: Int): String = androidx.compose.ui.res.stringResource(id)

@@ -83,6 +83,10 @@ android {
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
+    // Lifecycle-aware composables (LocalLifecycleOwner moved here from
+    // compose.ui in compose-bom 2025+; using the old path triggers a
+    // deprecation warning).
+    implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.activity.compose)
     // Pin fragment to a version that satisfies the
     // InvalidFragmentVersionForActivityResult lint check. Transitive

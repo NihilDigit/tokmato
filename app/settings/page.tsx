@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   Sun,
   Moon,
@@ -159,10 +159,14 @@ export default function SettingsPage() {
     }
   };
 
-  const clearPairCode = () => {
+  // Stable identity so PairCodeCard's effect doesn't re-arm its
+  // interval every time the parent re-renders (Settings subscribes to
+  // 9 store fields; any token earned would otherwise tear down + rebuild
+  // the timer).
+  const clearPairCode = useCallback(() => {
     setPairCode(null);
     setPairExpiresAt(0);
-  };
+  }, []);
 
   const handleEnablePush = async () => {
     setPushBusy(true);

@@ -5,7 +5,7 @@
 
     <string name="bind_kicker">tokmato relay</string>
     <string name="bind_title">输入配对码</string>
-    <string name="bind_subtitle">在 tokmato 网页端 Settings → 添加 Android 推送设备 生成 4 位码</string>
+    <string name="bind_subtitle">在 tokmato 网页端 Settings → Android 推送增强器 → 生成配对码</string>
     <string name="bind_cta">绑定设备</string>
     <string name="bind_pending">绑定中…</string>
     <string name="bind_error_invalid">码不对或已过期</string>
@@ -13,7 +13,7 @@
 
     <string name="bound_kicker">tokmato relay</string>
     <string name="bound_title">推送已就绪</string>
-    <string name="bound_subtitle">本机会接收来自 tokmato 服务的推送，绕过 Doze 直送通知栏。所有功能在网页端使用。</string>
+    <string name="bound_subtitle">本机会接收 tokmato 的推送，锁屏后也能直送通知栏。所有功能在网页端使用。</string>
     <string name="bound_open_web">在浏览器打开 tokmato</string>
     <string name="bound_rebind">重新绑定</string>
 
