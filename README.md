@@ -117,4 +117,6 @@ git push origin main v2.x
 
 ## 许可
 
-MIT。欢迎 PR；本项目由个人维护，涉及行为改动的 PR 请先在 Issue 中提 RFC 对齐方向。
+AGPL-3.0。完整文本见 [LICENSE](./LICENSE)。任何在网络上对外提供本项目（含修改版）的服务，需向用户提供对应的源代码。
+
+欢迎 PR；本项目由个人维护，涉及行为改动的 PR 请先在 Issue 中提 RFC 对齐方向。
