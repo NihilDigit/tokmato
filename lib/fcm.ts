@@ -89,10 +89,20 @@ export type FcmResult =
  * Send a single FCM message at high priority. Caller is responsible
  * for cleanup (HDEL'ing UNREGISTERED tokens from KV).
  *
- * High priority + the `notification` block is what wakes the device
- * out of Doze: a data-only message would be deferred. We pin
- * channel_id to a stable string so all tokmato pushes hit the same
- * Android notification channel.
+ * Data-only payload: when an FCM message includes a `notification`
+ * block, Firebase auto-renders it on the lock screen / tray when the
+ * app is in the background, and the tap action defaults to the
+ * launcher activity — bypassing any PendingIntent we set in
+ * onMessageReceived. Sending data-only forces the relay APK's
+ * FirebaseMessagingService.onMessageReceived to fire on every
+ * delivery, which is where we attach the deep-link PendingIntent.
+ *
+ * High priority + data-only still escapes Doze on Android: FCM wakes
+ * the messaging service briefly (this is allowed under the BG-FGS
+ * restrictions because we never start a foreground service, only call
+ * NotificationManager.notify, which is permitted from a backgrounded
+ * MessagingService). All values must be strings — FCM data is a
+ * Map<string,string>.
  */
 export async function sendFcmPush(
   token: string,
@@ -103,17 +113,14 @@ export async function sendFcmPush(
   const url = payload.url ?? "https://tokmato.nihildigit.dev/home";
   const message: Message = {
     token,
-    notification: {
+    data: {
       title: payload.title,
       body: payload.body,
+      url,
+      tag: payload.tag ?? "tokmato",
     },
-    data: { url },
     android: {
       priority: "high",
-      notification: {
-        tag: payload.tag ?? "tokmato",
-        channelId: "tokmato-default",
-      },
     },
   };
   try {
