@@ -204,7 +204,6 @@ function ProviderInner({ children }: { children: React.ReactNode }) {
   // Read play session at the root so the timer rail stays visible on any tab.
   const playSession = useStore((s) => s.playSession);
   const endPlay = useStore((s) => s.endPlay);
-  const removeKanbanCard = useStore((s) => s.removeKanbanCard);
 
   return (
     <ThemeProvider>
@@ -212,11 +211,8 @@ function ProviderInner({ children }: { children: React.ReactNode }) {
       {playSession && (
         <EntertainmentRunningView
           session={playSession}
-          onEnd={({ refundMinutes, result, completeKanban, kanbanCardId }) => {
-            if (completeKanban && kanbanCardId) {
-              removeKanbanCard(kanbanCardId);
-            }
-            endPlay({ refundMinutes, result, kanbanCardId });
+          onEnd={({ refundMinutes }) => {
+            endPlay({ refundMinutes });
             // Only early endings should cancel the scheduled play-end
             // notification. Natural expiry keeps the QStash callback alive
             // so a locked/closed device still gets pulled back.

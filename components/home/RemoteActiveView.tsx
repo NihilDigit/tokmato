@@ -8,9 +8,9 @@
  *
  * Like `RunningView`, the displayed time is derived every tick from
  * `Date.now() - phaseStartedAt`; we don't decrement a counter. The
- * server-side advance in `/api/push/fire` keeps `phaseStartedAt` /
- * `mode` / `count` fresh on each chain link even while the originator
- * tab is closed.
+ * server-side advance in `/api/push/fire` keeps `phaseStartedAt` and
+ * `count` fresh on each chain link even while the originator tab is
+ * closed.
  */
 
 import { useState } from "react";
@@ -21,7 +21,6 @@ import { useWallClockNow } from "@/components/timer/use-wall-clock-now";
 import type { ActiveSessionMarker } from "@/app/actions/active-session";
 
 const POMO_MS = 25 * 60 * 1000;
-const BUFFER_MS = 60 * 1000;
 
 const TAG_TONE: Record<string, { bg: string; text: string }> = {
   cs: { bg: "bg-paper-2", text: "text-ink" },
@@ -62,11 +61,9 @@ export function RemoteActiveView({
     });
   }, { disabled: ending });
 
-  const phaseDuration = marker.mode === "running" ? POMO_MS : BUFFER_MS;
   const elapsed = Math.max(0, now - marker.phaseStartedAt);
-  const remainingMs = Math.max(0, phaseDuration - elapsed);
-  const progress = Math.min(1, elapsed / phaseDuration);
-  const isBuffer = marker.mode === "buffer";
+  const remainingMs = Math.max(0, POMO_MS - elapsed);
+  const progress = Math.min(1, elapsed / POMO_MS);
 
   return (
     <main className="flex flex-col gap-6">
@@ -80,13 +77,8 @@ export function RemoteActiveView({
             <div className="font-mono text-display leading-none tracking-tight text-ink-2">
               {fmtMmSs(remainingMs)}
             </div>
-            <div
-              className={cn(
-                "smallcaps mt-2",
-                isBuffer ? "text-tomato-deep" : "text-ink-3",
-              )}
-            >
-              第 {marker.count} 个番茄 · {isBuffer ? "缓冲" : "进行中"}
+            <div className="smallcaps mt-2 text-ink-3">
+              第 {marker.count} 个番茄 · 进行中
             </div>
           </div>
         </div>

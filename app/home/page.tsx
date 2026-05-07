@@ -44,7 +44,6 @@ export default function HomePage() {
     startSession,
     endSession,
     addKanbanCard,
-    removeKanbanCard,
   } = useStore(
     useShallow((s) => ({
       session: s.session,
@@ -64,7 +63,6 @@ export default function HomePage() {
       startSession: s.startSession,
       endSession: s.endSession,
       addKanbanCard: s.addKanbanCard,
-      removeKanbanCard: s.removeKanbanCard,
     })),
   );
 
@@ -85,14 +83,7 @@ export default function HomePage() {
             const id = `n-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
             addKanbanCard({ col: action, card: { id, name: note, next: "" } });
           }
-          if (feedback.completeKanban && feedback.kanbanCardId) {
-            removeKanbanCard(feedback.kanbanCardId);
-          }
-          endSession({
-            completedCount,
-            result: feedback.result,
-            kanbanCardId: feedback.kanbanCardId,
-          });
+          endSession({ completedCount, result: feedback.result });
           // Tear down the server-side push chain so no further
           // boundary notifications fire for the session we just ended.
           void cancelPushChain("pomodoro").catch(() => {});
@@ -212,11 +203,12 @@ export default function HomePage() {
         onConfirm={(d) => {
           startSession(d);
           setOpenStart(false);
-          // Schedule the first phase boundary on the server so a
+          // Schedule the first 25-min boundary on the server so a
           // closed-browser user still gets the running-end alert.
           // The chain self-perpetuates from there. sessionId is the
-          // current phaseStartedAt — manual advances rotate it,
-          // invalidating any in-flight QStash callbacks.
+          // initial phaseStartedAt — once an end-session lands or a
+          // new session starts, sessionId rotates, invalidating any
+          // in-flight QStash callbacks for the prior chain.
           const fresh = useStore.getState().session;
           if (fresh) {
             void startPushChain({
@@ -234,7 +226,6 @@ export default function HomePage() {
               type: fresh.type,
               startedAt: fresh.startedAt,
               phaseStartedAt: fresh.phaseStartedAt,
-              mode: fresh.mode,
               count: fresh.count,
             }).catch(() => {});
           }

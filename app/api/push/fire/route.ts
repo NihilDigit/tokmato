@@ -26,12 +26,11 @@ import {
 import { pushCallbackUrl } from "@/lib/push-callback-url";
 
 const POMO_MS = 25 * 60 * 1000;
-const BUFFER_MS = 60 * 1000;
 
 const callbackBodySchema = z.object({
   userId: z.string().min(1).max(100),
   sessionId: z.string().min(1).max(100),
-  kind: z.enum(["running-end", "buffer-end", "play-end"]),
+  kind: z.enum(["running-end", "play-end"]),
   count: z.number().int().min(1).max(1000),
 });
 
@@ -88,14 +87,7 @@ export async function POST(request: Request) {
     kind === "running-end"
       ? {
           title: "番茄完成",
-          body: `第 ${count} 个番茄结束，进入 1 分钟缓冲`,
-          tag: "tokmato-pomodoro",
-          url: homeUrl,
-        }
-      : kind === "buffer-end"
-      ? {
-          title: "缓冲结束",
-          body: `第 ${count + 1} 个番茄开始`,
+          body: `第 ${count} 个番茄结束，第 ${count + 1} 个已开始`,
           tag: "tokmato-pomodoro",
           url: homeUrl,
         }
@@ -179,16 +171,18 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true, chained: false });
   }
 
-  const next =
-    kind === "running-end"
-      ? { kind: "buffer-end" as const, count, delaySeconds: BUFFER_MS / 1000 }
-      : { kind: "running-end" as const, count: count + 1, delaySeconds: POMO_MS / 1000 };
-
+  // Single-phase loop: each running-end fires 25 min after the prior
+  // boundary and bumps the displayed count.
   try {
     const { messageId } = await publishWithDelay({
       callbackUrl: pushCallbackUrl(),
-      body: { userId, sessionId, kind: next.kind, count: next.count },
-      delaySeconds: next.delaySeconds,
+      body: {
+        userId,
+        sessionId,
+        kind: "running-end" as const,
+        count: count + 1,
+      },
+      delaySeconds: POMO_MS / 1000,
     });
     await redis.set(kvKey.pushPending(userId), {
       messageId,
@@ -213,28 +207,23 @@ type ActiveMarker = {
   type: string;
   startedAt: number;
   phaseStartedAt: number;
-  mode: "running" | "buffer";
   count: number;
   updatedAt: number;
 };
 
-/** Read the marker, advance one phase, write it back. The advance
- *  rules mirror `advancePomodoroPhase` in the client store: natural
- *  boundary bumps `phaseStartedAt` by the elapsed phase duration,
- *  flips mode, and increments count when going buffer→running.
- *  No-op if the marker doesn't exist (e.g. the user already ended). */
+/** Read the marker, roll forward one 25-minute pomodoro, write it back.
+ *  Mirrors `advancePomodoroPhase` in the client store. No-op if the
+ *  marker doesn't exist (e.g. the user already ended). */
 async function advanceActiveMarker(
   redis: ReturnType<typeof requireRedis>,
   userId: string
 ): Promise<void> {
   const marker = await redis.get<ActiveMarker>(kvKey.activeSession(userId));
   if (!marker) return;
-  const isRunning = marker.mode === "running";
   const next: ActiveMarker = {
     ...marker,
-    mode: isRunning ? "buffer" : "running",
-    phaseStartedAt: marker.phaseStartedAt + (isRunning ? POMO_MS : BUFFER_MS),
-    count: isRunning ? marker.count : marker.count + 1,
+    phaseStartedAt: marker.phaseStartedAt + POMO_MS,
+    count: marker.count + 1,
     updatedAt: Date.now(),
   };
   await redis.set(kvKey.activeSession(userId), next, { ex: ACTIVE_TTL_SECONDS });

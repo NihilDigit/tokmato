@@ -29,7 +29,6 @@ const ACTIVE_TTL_SECONDS = 30 * 60;
 // session has, so any string the local store accepts should round-trip.
 const tagId = z.string().min(1).max(200);
 const sessionType = z.enum(["input", "output"]);
-const sessionMode = z.enum(["running", "buffer"]);
 
 const activeSessionMarkerSchema = z.object({
   task: z.string().max(500),
@@ -37,7 +36,9 @@ const activeSessionMarkerSchema = z.object({
   type: sessionType,
   startedAt: z.number().int().min(0),
   phaseStartedAt: z.number().int().min(0),
-  mode: sessionMode,
+  // v9 dropped the running/buffer phase split — old clients may still
+  // emit this; accept and ignore.
+  mode: z.enum(["running", "buffer"]).optional(),
   count: z.number().int().min(1).max(1000),
   updatedAt: z.number().int().min(0),
 });

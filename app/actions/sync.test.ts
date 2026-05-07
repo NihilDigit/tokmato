@@ -141,7 +141,6 @@ describeIf("sync server actions (real Redis)", async () => {
       task: "Kira 第三章",
       tag: "math",
       type: "input",
-      mode: "running",
       startedAt: Date.now() - 60_000,
       phaseStartedAt: Date.now() - 60_000,
       count: 1,
