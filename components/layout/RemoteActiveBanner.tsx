@@ -15,7 +15,6 @@ import { clearActiveSession } from "@/app/actions/active-session";
 import { cn } from "@/lib/utils";
 
 const POMO_MS = 25 * 60 * 1000;
-const BUFFER_MS = 60 * 1000;
 
 function fmtMmSs(ms: number): string {
   const sec = Math.max(0, Math.ceil(ms / 1000));
@@ -41,10 +40,8 @@ export function RemoteActiveBanner() {
   if (!remoteActive) return null;
   if (pathname === "/home" || pathname === "/") return null;
 
-  const phaseDuration = remoteActive.mode === "running" ? POMO_MS : BUFFER_MS;
   const elapsed = Math.max(0, now - remoteActive.phaseStartedAt);
-  const remainingMs = Math.max(0, phaseDuration - elapsed);
-  const isBuffer = remoteActive.mode === "buffer";
+  const remainingMs = Math.max(0, POMO_MS - elapsed);
 
   return (
     <div
@@ -58,15 +55,9 @@ export function RemoteActiveBanner() {
     >
       <span
         aria-hidden
-        className={cn(
-          "size-2 shrink-0 rounded-full",
-          isBuffer ? "bg-tomato-deep" : "bg-tomato",
-          "animate-pulse",
-        )}
+        className="size-2 shrink-0 rounded-full bg-tomato animate-pulse"
       />
-      <span className="smallcaps shrink-0 text-ink-2">
-        {isBuffer ? "另一端缓冲中" : "另一端番茄中"}
-      </span>
+      <span className="smallcaps shrink-0 text-ink-2">另一端番茄中</span>
       <span className="mono text-xs text-ink-3">
         第 {remoteActive.count} · {fmtMmSs(remainingMs)}
       </span>

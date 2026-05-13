@@ -7,7 +7,7 @@
  * minutes; ending naturally (timer reaches 0) does not.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
 import { useHoldConfirm } from "@/components/timer/use-hold-confirm";
 import { useWallClockNow } from "@/components/timer/use-wall-clock-now";
@@ -51,12 +51,7 @@ export interface EntertainmentRunningViewProps {
   session: PlaySession;
   /** Called when timer reaches 0 OR user long-presses end early.
    *  `refundMinutes` is non-zero only on early-end. */
-  onEnd: (data: {
-    refundMinutes: number;
-    result?: string;
-    completeKanban?: boolean;
-    kanbanCardId?: string;
-  }) => void;
+  onEnd: (data: { refundMinutes: number }) => void;
 }
 
 export function EntertainmentRunningView({
@@ -66,24 +61,11 @@ export function EntertainmentRunningView({
   const totalMs = session.totalMinutes * 60 * 1000;
   const costMinutes = session.costMinutes ?? session.totalMinutes;
   const refundScale = session.totalMinutes > 0 ? costMinutes / session.totalMinutes : 1;
-  const [pendingRefund, setPendingRefund] = useState<number | null>(null);
-  const [result, setResult] = useState(session.task ?? "");
-  const [completeKanban, setCompleteKanban] = useState(!!session.kanbanCardId);
-  const now = useWallClockNow({ paused: pendingRefund !== null });
+  const now = useWallClockNow();
   const secondsLeft = Math.max(
     0,
     Math.ceil((totalMs - (now - session.startedAt)) / 1000)
   );
-
-  const finish = (refundMinutes: number) => {
-    if (session.kanbanCardId) {
-      setPendingRefund(refundMinutes);
-      setResult(session.task ?? "");
-      setCompleteKanban(true);
-      return;
-    }
-    onEnd({ refundMinutes });
-  };
 
   // Auto-end at boundary
   const endedRef = useRef(false);
@@ -92,19 +74,20 @@ export function EntertainmentRunningView({
     if (secondsLeft <= 0) {
       endedRef.current = true;
       firePlayNotification();
-      finish(0);
+      onEnd({ refundMinutes: 0 });
     }
-  }, [secondsLeft]);
+  }, [secondsLeft, onEnd]);
 
   const { holding, startHold, cancelHold } = useHoldConfirm(() => {
+    if (endedRef.current) return;
+    endedRef.current = true;
     // Refund unused pool cost, not just visible timer minutes.
     const refund = Math.floor((secondsLeft / 60) * refundScale);
-    finish(refund);
+    onEnd({ refundMinutes: refund });
   });
 
   const totalSec = totalMs / 1000;
   const progress = totalSec > 0 ? 1 - secondsLeft / totalSec : 1;
-  const isResolving = pendingRefund !== null;
 
   return (
     <div
@@ -136,75 +119,35 @@ export function EntertainmentRunningView({
               </span>
             </div>
             <div className="mono mt-1 text-[11px] leading-tight text-ink-3 tabular-nums">
-              {isResolving
-                ? "结束反馈"
-                : `${session.totalMinutes} min · 已扣 ${costMinutes} min`}
+              {`${session.totalMinutes} min · 已扣 ${costMinutes} min`}
             </div>
           </div>
 
-          {isResolving ? (
-            <button
-              type="button"
-              onClick={() =>
-                onEnd({
-                  refundMinutes: pendingRefund,
-                  result: result.trim() || session.task,
-                  completeKanban,
-                  kanbanCardId: session.kanbanCardId,
-                })
-              }
-              className="h-11 shrink-0 rounded-lg bg-ink px-4 text-[12px] font-medium text-paper"
-            >
-              入账
-            </button>
-          ) : (
-            <>
-              <div className="font-mono text-[30px] leading-none text-ink tabular-nums">
-                {fmtMmSs(secondsLeft)}
-              </div>
-
-              <button
-                type="button"
-                onPointerDown={startHold}
-                onPointerUp={cancelHold}
-                onPointerLeave={cancelHold}
-                onPointerCancel={cancelHold}
-                className={cn(
-                  "relative grid h-11 w-20 shrink-0 select-none place-items-center overflow-hidden rounded-lg",
-                  "border border-rule bg-paper-2 text-[12px] font-medium text-ink transition active:scale-[0.99]"
-                )}
-              >
-                <div
-                  aria-hidden
-                  className="absolute inset-0 origin-left bg-teal-soft transition-transform duration-75"
-                  style={{ transform: `scaleX(${holding})` }}
-                />
-                <span className="relative z-10">
-                  {holding > 0.05 ? "按住" : "结束"}
-                </span>
-              </button>
-            </>
-          )}
-        </div>
-        {isResolving && (
-          <div className="border-t border-rule px-4 py-3">
-            <input
-              value={result}
-              onChange={(e) => setResult(e.target.value)}
-              aria-label="娱乐结果"
-              className="w-full border-0 border-b border-rule bg-transparent py-1.5 font-kaiti text-[14px] text-ink focus:border-teal focus:outline-none"
-            />
-            <label className="mt-2 flex items-center gap-2 text-[12px] text-ink-2">
-              <input
-                type="checkbox"
-                checked={completeKanban}
-                onChange={(e) => setCompleteKanban(e.target.checked)}
-                className="[accent-color:var(--teal)]"
-              />
-              完成此 Kanban 任务
-            </label>
+          <div className="font-mono text-[30px] leading-none text-ink tabular-nums">
+            {fmtMmSs(secondsLeft)}
           </div>
-        )}
+
+          <button
+            type="button"
+            onPointerDown={startHold}
+            onPointerUp={cancelHold}
+            onPointerLeave={cancelHold}
+            onPointerCancel={cancelHold}
+            className={cn(
+              "relative grid h-11 w-20 shrink-0 select-none place-items-center overflow-hidden rounded-lg",
+              "border border-rule bg-paper-2 text-[12px] font-medium text-ink transition active:scale-[0.99]"
+            )}
+          >
+            <div
+              aria-hidden
+              className="absolute inset-0 origin-left bg-teal-soft transition-transform duration-75"
+              style={{ transform: `scaleX(${holding})` }}
+            />
+            <span className="relative z-10">
+              {holding > 0.05 ? "按住" : "结束"}
+            </span>
+          </button>
+        </div>
       </div>
     </div>
   );

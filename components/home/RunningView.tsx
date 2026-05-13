@@ -6,13 +6,16 @@
  * Clock-based: countdown is computed every tick from
  * `Date.now() - session.phaseStartedAt`, never decremented from local
  * state. So if the tab is throttled or briefly closed and reopened,
- * the displayed time stays correct and crossed phase boundaries are
+ * the displayed time stays correct and crossed pomodoro boundaries are
  * caught up by `advancePomodoroPhase()`.
  *
- * Notification API: best-effort permission request on first mount of
- * an active session; fires a desktop notification on each phase
- * boundary so a backgrounded user is alerted. (Service-worker / Web
- * Push for fully-closed-tab alerts is out of scope for v1.4.)
+ * v9: the running/buffer phase split is gone. A pomodoro string runs
+ * continuously — every 25 min the count rolls forward. Long-press end
+ * branches by elapsed-into-current-pomodoro:
+ *   - elapsed < 13 min → discard the current pomodoro (awardCount = count - 1)
+ *   - elapsed ≥ 13 min → let the user either discard, or fill in what
+ *     they actually accomplished and have it counted as a full pomodoro
+ *     (awardCount = count).
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -20,15 +23,15 @@ import { TomatoIcon } from "@/components/animations/TomatoIcon";
 import { NotesSheet } from "@/components/sheets/NotesSheet";
 import { ResponsiveSheet } from "@/components/ui/responsive-sheet";
 import { useStore } from "@/lib/store";
-import { startPushChain } from "@/app/actions/push";
-import { setActiveSession } from "@/app/actions/active-session";
 import { cn } from "@/lib/utils";
 import { useHoldConfirm } from "@/components/timer/use-hold-confirm";
 import { useWallClockNow } from "@/components/timer/use-wall-clock-now";
 import type { PomodoroSession, KanbanColumnId } from "@/lib/types";
 
 const POMO_MS = 25 * 60 * 1000;
-const BUFFER_MS = 60 * 1000;
+/** Keep-or-discard cutoff: a pomodoro that ran at least this long can be
+ *  preserved with a written reason. Anything shorter is always discarded. */
+const KEEP_THRESHOLD_MS = 13 * 60 * 1000;
 
 const TAG_TONE: Record<string, { bg: string; text: string }> = {
   cs: { bg: "bg-paper-2", text: "text-ink" },
@@ -74,7 +77,7 @@ export interface RunningViewProps {
   onEnd: (
     assignments: { note: string; action: KanbanColumnId | "delete" }[],
     completedCount: number,
-    feedback: { result: string; completeKanban: boolean; kanbanCardId?: string }
+    feedback: { result: string }
   ) => void;
 }
 
@@ -82,8 +85,7 @@ export function RunningView({ session, onEnd }: RunningViewProps) {
   const advancePhase = useStore((s) => s.advancePomodoroPhase);
   const addNoteToSession = useStore((s) => s.addNoteToSession);
 
-  const { mode, count, phaseStartedAt } = session;
-  const phaseDuration = mode === "running" ? POMO_MS : BUFFER_MS;
+  const { count, phaseStartedAt } = session;
 
   // Notes typed during this string of pomodoros — read straight from
   // the persisted session so a refresh / remount keeps them. Local
@@ -95,12 +97,11 @@ export function RunningView({ session, onEnd }: RunningViewProps) {
   const [showNotesSheet, setShowNotesSheet] = useState(false);
   const [showEndSheet, setShowEndSheet] = useState(false);
   const [pendingNotes, setPendingNotes] = useState<string[]>([]);
+  /** Locked at the moment the long-press completes so the sheet's mode
+   *  doesn't flip mid-confirmation if the user dwells past 13 min. */
+  const [endElapsedMs, setEndElapsedMs] = useState(0);
   const pendingAwardCountRef = useRef(0);
-  const pendingFeedbackRef = useRef<{
-    result: string;
-    completeKanban: boolean;
-    kanbanCardId?: string;
-  } | null>(null);
+  const pendingFeedbackRef = useRef<{ result: string } | null>(null);
   const endResolvedRef = useRef(false);
 
   // Wall-clock tick — single source of truth for displayed time.
@@ -120,32 +121,27 @@ export function RunningView({ session, onEnd }: RunningViewProps) {
     }
   }, []);
 
-  // ─── Auto-advance + notify when phase boundary crosses ─────────────────
+  // ─── Auto-advance + notify when a pomodoro boundary crosses ────────────
   useEffect(() => {
-    if (showNotesSheet) return;
+    if (showNotesSheet || showEndSheet) return;
     const elapsed = now - phaseStartedAt;
-    if (elapsed < phaseDuration) return;
-    const boundaryAt = phaseStartedAt + phaseDuration;
+    if (elapsed < POMO_MS) return;
+    const boundaryAt = phaseStartedAt + POMO_MS;
     if (lastNotifiedBoundaryRef.current !== boundaryAt) {
       lastNotifiedBoundaryRef.current = boundaryAt;
-      if (mode === "running") {
-        fireNotification("番茄完成", "进入 1 分钟缓冲");
-      } else {
-        fireNotification("缓冲结束", `第 ${count + 1} 个番茄开始`);
-      }
+      fireNotification("番茄完成", `第 ${count + 1} 个番茄开始`);
     }
     advancePhase({ now });
-  }, [now, mode, count, phaseStartedAt, phaseDuration, advancePhase, showNotesSheet]);
+  }, [now, count, phaseStartedAt, advancePhase, showNotesSheet, showEndSheet]);
 
   // Long-press end is a *deliberate cut-off*, not a celebration —
-  // skip confetti and go straight to notes review (or end if empty).
+  // skip confetti and go straight to the end-feedback sheet.
   const triggerEnd = () => {
     if (endResolvedRef.current) return;
     const finalNotes = noteDraft.trim()
       ? [...notes, noteDraft.trim()]
       : notes;
-    const awardCount = mode === "buffer" ? count : Math.max(0, count - 1);
-    pendingAwardCountRef.current = awardCount;
+    setEndElapsedMs(Math.max(0, Date.now() - phaseStartedAt));
     setPendingNotes(finalNotes);
     setShowEndSheet(true);
   };
@@ -158,23 +154,16 @@ export function RunningView({ session, onEnd }: RunningViewProps) {
     onEnd(
       assignments,
       pendingAwardCountRef.current,
-      pendingFeedbackRef.current ?? {
-        result: session.task,
-        completeKanban: false,
-        kanbanCardId: session.kanbanCardId,
-      }
+      pendingFeedbackRef.current ?? { result: session.task },
     );
   };
 
-  const handleEndFeedbackConfirm = (feedback: {
+  const handleEndFeedbackConfirm = (data: {
+    awardCount: number;
     result: string;
-    completeKanban: boolean;
   }) => {
-    pendingFeedbackRef.current = {
-      result: feedback.result,
-      completeKanban: feedback.completeKanban,
-      kanbanCardId: session.kanbanCardId,
-    };
+    pendingAwardCountRef.current = data.awardCount;
+    pendingFeedbackRef.current = { result: data.result };
     setShowEndSheet(false);
     if (pendingNotes.length > 0) {
       setShowNotesSheet(true);
@@ -200,54 +189,16 @@ export function RunningView({ session, onEnd }: RunningViewProps) {
   };
 
   // ─── Render ─────────────────────────────────────────────────────────────
-  const isBuffer = mode === "buffer";
   const elapsed = Math.max(0, now - phaseStartedAt);
-  const remainingMs = Math.max(0, phaseDuration - elapsed);
-  const progress = Math.min(1, elapsed / phaseDuration);
+  const remainingMs = Math.max(0, POMO_MS - elapsed);
+  const progress = Math.min(1, elapsed / POMO_MS);
 
-  // Active session count display: in running mode we're working on the nth,
-  // in buffer mode the nth was just completed.
-  const completedCount = isBuffer ? count : count - 1;
+  // Display: count is the in-progress pomodoro number; (count - 1) are
+  // already banked as completed.
+  const completedCount = Math.max(0, count - 1);
 
   return (
     <main className="flex flex-col gap-6">
-      {/* Buffer full-screen overlay (replaces the legacy thin top banner) */}
-      {isBuffer && (
-        <BufferOverlay
-          remainingMs={remainingMs}
-          completedCount={count}
-          onContinue={() => {
-            advancePhase({ manual: true });
-            // The local `now` we have here is up to 250ms stale;
-            // re-read from the store so the server-scheduled boundary
-            // matches what the local timer will display.
-            const fresh = useStore.getState().session;
-            if (fresh) {
-              void startPushChain({
-                sessionId: String(fresh.phaseStartedAt),
-                boundaryAt: fresh.phaseStartedAt + POMO_MS,
-                kind: "running-end",
-                count: fresh.count,
-              }).catch(() => {});
-              // Refresh the cross-device marker — manual skip changes
-              // both phaseStartedAt and count, so the other device
-              // would otherwise show stale numbers until the next
-              // poll-tick (or until /api/push/fire's natural advance).
-              void setActiveSession({
-                task: fresh.task,
-                tag: fresh.tag,
-                type: fresh.type,
-                startedAt: fresh.startedAt,
-                phaseStartedAt: fresh.phaseStartedAt,
-                mode: fresh.mode,
-                count: fresh.count,
-              }).catch(() => {});
-            }
-          }}
-          onEnd={triggerEnd}
-        />
-      )}
-
       {/* Two-column layout (single column on narrow screens) */}
       <section className="grid grid-cols-1 items-center gap-8 wide:grid-cols-2 wide:gap-12">
         {/* Left: tomato + countdown */}
@@ -259,7 +210,7 @@ export function RunningView({ session, onEnd }: RunningViewProps) {
             <div className="font-mono text-display leading-none tracking-tight text-ink">
               {fmtMmSs(remainingMs)}
             </div>
-            <div className={cn("smallcaps mt-2", isBuffer ? "text-tomato-deep" : "text-ink-3")}>
+            <div className="smallcaps mt-2 text-ink-3">
               第 {count} 个番茄 · 进行中
             </div>
           </div>
@@ -352,7 +303,7 @@ export function RunningView({ session, onEnd }: RunningViewProps) {
               </span>
             </button>
             <p className="mt-2 text-center text-[11px] text-ink-mute">
-              番茄到点会自动续杯 · 长按 1.5 秒结束当前串
+              番茄 25 分钟自动续约 · 长按 1.5 秒结束当前串
             </p>
           </div>
         </div>
@@ -362,14 +313,12 @@ export function RunningView({ session, onEnd }: RunningViewProps) {
       <PomodoroEndSheet
         open={showEndSheet}
         expected={session.task}
-        bound={!!session.kanbanCardId}
+        elapsedMs={endElapsedMs}
+        count={count}
         onOpenChange={(v) => {
-          if (!v && showEndSheet) {
-            handleEndFeedbackConfirm({
-              result: session.task,
-              completeKanban: false,
-            });
-          }
+          // Closing the sheet without an explicit decision = cancel.
+          // The pomodoro keeps running; the user can long-press again.
+          if (!v) setShowEndSheet(false);
         }}
         onConfirm={handleEndFeedbackConfirm}
       />
@@ -393,140 +342,132 @@ export function RunningView({ session, onEnd }: RunningViewProps) {
 function PomodoroEndSheet({
   open,
   expected,
-  bound,
+  elapsedMs,
+  count,
   onOpenChange,
   onConfirm,
 }: {
   open: boolean;
   expected: string;
-  bound: boolean;
+  elapsedMs: number;
+  count: number;
   onOpenChange: (open: boolean) => void;
-  onConfirm: (data: { result: string; completeKanban: boolean }) => void;
+  onConfirm: (data: { awardCount: number; result: string }) => void;
 }) {
+  const isLong = elapsedMs >= KEEP_THRESHOLD_MS;
   const [result, setResult] = useState(expected);
-  const [completeKanban, setCompleteKanban] = useState(bound);
 
   useEffect(() => {
     if (!open) return;
     setResult(expected);
-    setCompleteKanban(bound);
-  }, [open, expected, bound]);
+  }, [open, expected]);
 
-  const confirm = () =>
-    onConfirm({
-      result: result.trim() || expected,
-      completeKanban: bound && completeKanban,
-    });
+  const trimmedResult = result.trim();
+  const completedSoFar = Math.max(0, count - 1);
+
+  const discard = () =>
+    onConfirm({ awardCount: completedSoFar, result: "" });
+
+  const keep = () => {
+    if (!trimmedResult) return; // 长路径下"按完整算"必须填原因
+    onConfirm({ awardCount: count, result: trimmedResult });
+  };
 
   return (
     <ResponsiveSheet
       open={open}
       onOpenChange={onOpenChange}
-      title="结束反馈"
+      title="提前结束这一串"
     >
       <div className="flex flex-col gap-5">
-        <div>
-          <div className="smallcaps mb-2">预期</div>
-          <div className="serif text-[18px] leading-snug text-ink">{expected}</div>
+        <div className="flex items-baseline gap-3">
+          <div>
+            <div className="smallcaps mb-1">已完成</div>
+            <div className="serif text-h3 leading-none text-ink">
+              {completedSoFar}
+              <span className="ml-1 text-[13px] text-ink-3">个</span>
+            </div>
+          </div>
+          <div className="ml-auto text-right">
+            <div className="smallcaps mb-1">第 {count} 个进行了</div>
+            <div className="font-mono text-h3 leading-none text-ink">
+              {fmtMmSs(elapsedMs)}
+            </div>
+          </div>
         </div>
-        <div>
-          <div className="smallcaps mb-2">结果</div>
-          <input
-            value={result}
-            onChange={(e) => setResult(e.target.value)}
-            className={cn(
-              "w-full border-0 border-b border-rule bg-transparent px-0 py-2",
-              "font-kaiti text-[16px] text-ink focus:border-tomato focus:outline-none"
-            )}
-          />
-        </div>
-        {bound && (
-          <label className="flex items-center gap-2 text-[13px] text-ink-2">
-            <input
-              type="checkbox"
-              checked={completeKanban}
-              onChange={(e) => setCompleteKanban(e.target.checked)}
-              className="[accent-color:var(--tomato)]"
-            />
-            完成此 Kanban 任务
-          </label>
+
+        {isLong ? (
+          <>
+            <p className="font-kaiti text-[14px] leading-relaxed text-ink-2">
+              超过 13 分钟。可填入这段时间的产出，按完整番茄计入；也可销毁。
+            </p>
+            <div>
+              <div className="smallcaps mb-2">这段时间做了什么</div>
+              <input
+                value={result}
+                onChange={(e) => setResult(e.target.value)}
+                placeholder={expected}
+                className={cn(
+                  "w-full border-0 border-b border-rule bg-transparent px-0 py-2",
+                  "font-kaiti text-[16px] text-ink focus:border-tomato focus:outline-none",
+                )}
+                autoFocus
+              />
+              {!trimmedResult && (
+                <p className="mt-1.5 text-[11px] text-ink-mute">
+                  必填 · 填了才能按完整算
+                </p>
+              )}
+            </div>
+            <div className="flex justify-end gap-2 border-t border-rule pt-5">
+              <button
+                type="button"
+                onClick={discard}
+                className="min-h-10 rounded-full border border-rule px-4 text-sm text-ink-2 hover:border-ink/30 hover:text-ink"
+              >
+                销毁第 {count} 个
+              </button>
+              <button
+                type="button"
+                onClick={keep}
+                disabled={!trimmedResult}
+                className={cn(
+                  "min-h-10 rounded-full bg-ink px-5 text-sm font-medium text-paper",
+                  "disabled:opacity-40 disabled:cursor-not-allowed",
+                )}
+              >
+                按完整算 · {count} 个
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <p className="font-kaiti text-[14px] leading-relaxed text-ink-2">
+              不到 13 分钟，第 {count} 个番茄会销毁。
+              {completedSoFar > 0
+                ? `已完成的 ${completedSoFar} 个仍计入。`
+                : "这一串不计入任何番茄。"}
+            </p>
+            <div className="flex justify-end gap-2 border-t border-rule pt-5">
+              <button
+                type="button"
+                onClick={() => onOpenChange(false)}
+                className="min-h-10 rounded-full px-4 text-sm text-ink-3 hover:text-ink"
+              >
+                继续这个番茄
+              </button>
+              <button
+                type="button"
+                onClick={discard}
+                className="min-h-10 rounded-full bg-ink px-5 text-sm font-medium text-paper"
+              >
+                销毁并结束
+              </button>
+            </div>
+          </>
         )}
-        <div className="flex justify-end gap-2 border-t border-rule pt-5">
-          <button
-            type="button"
-            onClick={() => onOpenChange(false)}
-            className="min-h-10 rounded-full px-4 text-sm text-ink-3 hover:text-ink"
-          >
-            跳过
-          </button>
-          <button
-            type="button"
-            onClick={confirm}
-            className="min-h-10 rounded-full bg-ink px-5 text-sm font-medium text-paper"
-          >
-            继续
-          </button>
-        </div>
       </div>
     </ResponsiveSheet>
-  );
-}
-
-// ────────────────────────────────────────────────────────────────────────────
-// BufferOverlay — full-screen pause between pomodoros (replaces legacy top
-// banner per phase-5 spec: "buffer banner 改全屏柔和过渡 + 中央倒计时")
-// ────────────────────────────────────────────────────────────────────────────
-function BufferOverlay({
-  remainingMs,
-  completedCount,
-  onContinue,
-  onEnd,
-}: {
-  remainingMs: number;
-  completedCount: number;
-  onContinue: () => void;
-  onEnd: () => void;
-}) {
-  return (
-    <div
-      role="dialog"
-      aria-label="缓冲期"
-      className="fade-in fixed inset-0 z-[150] flex flex-col items-center justify-center gap-8"
-      style={{
-        background: "var(--buffer-bg)",
-        backdropFilter: "blur(12px)",
-        WebkitBackdropFilter: "blur(12px)",
-      }}
-    >
-      <div className="flex flex-col items-center gap-3 text-center">
-        <div className="smallcaps text-tomato-deep">
-          第 {completedCount} 个番茄完成 · 缓冲中
-        </div>
-        <div className="font-mono text-display leading-none tracking-tight text-ink">
-          {fmtMmSs(remainingMs)}
-        </div>
-        <div className="font-kaiti italic max-w-[420px] px-6 text-[16px] leading-relaxed text-ink-2">
-          一分钟休息。喝口水, 看看远处, 然后继续下一个 25 分钟。
-        </div>
-      </div>
-
-      <div className="mt-2 flex flex-wrap items-center justify-center gap-3">
-        <button
-          type="button"
-          onClick={onContinue}
-          className="inline-flex min-h-12 items-center gap-2 rounded-full border border-rule bg-paper px-7 py-3 text-base font-medium text-ink-2 shadow-soft transition hover:border-ink/30 hover:text-ink"
-        >
-          继续下一个
-        </button>
-        <button
-          type="button"
-          onClick={onEnd}
-          className="inline-flex min-h-12 items-center gap-2 rounded-full bg-ink px-7 py-3 text-base font-medium text-paper shadow-soft transition hover:bg-ink-2"
-        >
-          结束这一串
-        </button>
-      </div>
-    </div>
   );
 }
 

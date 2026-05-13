@@ -6,7 +6,12 @@ import { ChevronDown, ChevronRight, Download } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { todayKey, yesterdayKey, useStore } from "@/lib/store";
 import { TAG_BG_CLASSES, TAG_CHIP_CLASSES } from "@/lib/tag-colors";
-import type { TagColor, TagConfig, TokenLedgerEntry } from "@/lib/types";
+import type {
+  PomodoroRecord,
+  TagColor,
+  TagConfig,
+  TokenLedgerEntry,
+} from "@/lib/types";
 import {
   computeDayTotals,
   formatDayLabel,
@@ -14,6 +19,7 @@ import {
   LedgerEntryRow,
 } from "@/components/ledger/LedgerRow";
 import { LedgerSheet } from "@/components/sheets/LedgerSheet";
+import { EditPomodoroSheet } from "@/components/sheets/EditPomodoroSheet";
 
 // ─────────────────────────────────────────────────────────────────────────
 // Journey — 年度回顾
@@ -135,6 +141,7 @@ export default function JourneyPage() {
   }, [activeTag, tagById]);
 
   const recentStrings = recentRecords.slice(0, 20).map((record) => ({
+    record,
     task: record.result || record.task,
     tag: tagById.get(record.tag),
     tagRaw: record.tag,
@@ -142,6 +149,11 @@ export default function JourneyPage() {
     mins: record.minutes,
     date: formatRecordTime(record.endedAt),
   }));
+
+  // Edit sheet — opens when a row is clicked.
+  const [editingRecord, setEditingRecord] = useState<PomodoroRecord | null>(
+    null,
+  );
 
   return (
     <main className="flex flex-col gap-10">
@@ -281,11 +293,14 @@ export default function JourneyPage() {
                 番茄结束后会出现在这里
               </p>
             ) : recentStrings.map((r, i) => (
-              <div
-                key={i}
+              <button
+                key={r.record.id}
+                type="button"
+                onClick={() => setEditingRecord(r.record)}
                 className={cn(
-                  "grid grid-cols-[1fr_auto_auto_auto] items-center gap-4 px-5 py-3.5 sm:gap-6 sm:px-6",
-                  i > 0 && "border-t border-rule"
+                  "grid w-full grid-cols-[1fr_auto_auto_auto] items-center gap-4 px-5 py-3.5 text-left transition sm:gap-6 sm:px-6",
+                  "hover:bg-paper-2/60",
+                  i > 0 && "border-t border-rule",
                 )}
               >
                 <div className="flex min-w-0 items-center gap-3">
@@ -308,13 +323,21 @@ export default function JourneyPage() {
                 <span className="min-w-[70px] text-right text-xs text-ink-mute sm:min-w-[80px]">
                   {r.date}
                 </span>
-              </div>
+              </button>
             ))}
           </div>
         </div>
       </section>
 
       <LedgerCompactSection />
+
+      <EditPomodoroSheet
+        open={editingRecord !== null}
+        onOpenChange={(v) => {
+          if (!v) setEditingRecord(null);
+        }}
+        record={editingRecord}
+      />
     </main>
   );
 }

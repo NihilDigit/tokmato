@@ -49,7 +49,6 @@ describeIf("active-session server actions (real Redis)", async () => {
       type: "input" as const,
       startedAt: 1_700_000_000_000,
       phaseStartedAt: 1_700_000_000_000,
-      mode: "running" as const,
       count: 1,
     };
   }
@@ -76,7 +75,6 @@ describeIf("active-session server actions (real Redis)", async () => {
     const got = await getActiveSession();
     expect(got).not.toBeNull();
     expect(got!.task).toBe("刷题");
-    expect(got!.mode).toBe("running");
     expect(got!.count).toBe(1);
     expect(got!.updatedAt).toBeGreaterThanOrEqual(before);
   });
@@ -102,13 +100,12 @@ describeIf("active-session server actions (real Redis)", async () => {
     expect(ttl).toBeLessThanOrEqual(30 * 60);
   });
 
-  it("setActiveSession overwrites the marker (manual buffer skip case)", async () => {
+  it("setActiveSession overwrites the marker (auto-advance refresh)", async () => {
     await setActiveSession(validMarker());
     const next = {
       ...validMarker(),
-      mode: "running" as const,
       count: 2,
-      phaseStartedAt: validMarker().phaseStartedAt + 26 * 60 * 1000,
+      phaseStartedAt: validMarker().phaseStartedAt + 25 * 60 * 1000,
     };
     await setActiveSession(next);
     const got = await getActiveSession();

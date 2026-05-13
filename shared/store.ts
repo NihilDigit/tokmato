@@ -257,12 +257,10 @@ interface StoreActions {
     minutes: number;
     costMinutes?: number;
     task?: string;
-    kanbanCardId?: string;
   }) => void;
   endPlay: (data?: {
     refundMinutes?: number;
     result?: string;
-    kanbanCardId?: string;
   }) => void;
 
   // Pomodoro session lifecycle
@@ -270,23 +268,30 @@ interface StoreActions {
     task: string;
     tag: TagId;
     type: SessionType;
-    kanbanCardId?: string;
   }) => void;
   endSession: (data?: {
     completedCount?: number;
     result?: string;
-    kanbanCardId?: string;
   }) => void;
   addNoteToSession: (note: string) => void;
   /**
-   * Advance the active session's phase based on wall-clock time.
-   *
-   * - `mode` flips between "running" (25min) and "buffer" (1min)
-   * - On natural advance the next `phaseStartedAt = current + duration`,
-   *   so multiple boundaries crossed during a sleep are caught up.
-   * - On manual buffer skip the next pomodoro starts at `now`.
+   * Auto-advance the active session if its current 25-minute pomodoro has
+   * elapsed. v9 dropped the buffer phase, so this is a single transition:
+   * `phaseStartedAt += POMO_MS` and `count += 1`, repeated until caught up
+   * with wall-clock time. No-ops if the boundary has not been crossed.
    */
-  advancePomodoroPhase: (data?: { manual?: boolean; now?: number }) => void;
+  advancePomodoroPhase: (data?: { now?: number }) => void;
+  /** Edit a stored pomodoro record's tag and/or result label. Tag changes
+   *  do not retroactively apply bonus deltas — the record's earned F is
+   *  frozen at end time. */
+  updatePomodoroRecord: (
+    id: string,
+    patch: { tag?: TagId; result?: string },
+  ) => void;
+  /** Drop a stored pomodoro record. Reverses its F + bonusF from the
+   *  balance, deletes the matching ledger entry, and rolls back today's
+   *  per-tag / total counters when the record belongs to the active day. */
+  deletePomodoroRecord: (id: string) => void;
 
   // Kanban
   moveKanbanCard: (data: { cardId: string; toCol: KanbanColumnId }) => void;
@@ -569,7 +574,7 @@ export const useStore = create<Store>()(
           };
         }),
 
-      startPlay: ({ type, minutes, costMinutes, task, kanbanCardId }) =>
+      startPlay: ({ type, minutes, costMinutes, task }) =>
         set((s) => {
           // Deduct upfront; endPlay can refund unused minutes if user
           // ends early. clamp avoids going negative if budget changed.
@@ -579,7 +584,6 @@ export const useStore = create<Store>()(
           const playSession: PlaySession = {
             type,
             ...(task ? { task } : {}),
-            ...(kanbanCardId ? { kanbanCardId } : {}),
             totalMinutes: minutes,
             costMinutes: actualCost,
             startedAt,
@@ -595,7 +599,6 @@ export const useStore = create<Store>()(
                   createdAt: startedAt,
                   dayKey: todayKey(new Date(startedAt)),
                   note: task || type,
-                  ...(kanbanCardId ? { refId: kanbanCardId } : {}),
                 }
               : null;
           return {
@@ -612,7 +615,6 @@ export const useStore = create<Store>()(
         set((s) => {
           const refund = data?.refundMinutes ?? 0;
           const result = data?.result?.trim();
-          const kanbanCardId = data?.kanbanCardId;
           if (refund <= 0) {
             if (result) {
               const createdAt = Date.now();
@@ -624,7 +626,6 @@ export const useStore = create<Store>()(
                 createdAt,
                 dayKey: todayKey(new Date(createdAt)),
                 note: result,
-                ...(kanbanCardId ? { refId: kanbanCardId } : {}),
               };
               return {
                 playSession: null,
@@ -647,7 +648,6 @@ export const useStore = create<Store>()(
             createdAt,
             dayKey: todayKey(new Date(createdAt)),
             note: result || "refund",
-            ...(kanbanCardId ? { refId: kanbanCardId } : {}),
           };
           return {
             playSession: null,
@@ -675,17 +675,15 @@ export const useStore = create<Store>()(
           };
         }),
 
-      startSession: ({ task, tag, type, kanbanCardId }) => {
+      startSession: ({ task, tag, type }) => {
         const now = Date.now();
         const session: PomodoroSession = {
           task,
-          ...(kanbanCardId ? { kanbanCardId } : {}),
           tag,
           type,
           startedAt: now,
           phaseStartedAt: now,
           count: 1,
-          mode: "running",
           notes: [],
         };
         set((s) => ({ ...normalizeDay(s), session }));
@@ -695,44 +693,86 @@ export const useStore = create<Store>()(
         set((s) => {
           if (!s.session) return s;
           const now = data?.now ?? Date.now();
-          const manual = data?.manual === true;
           const POMO_MS = 25 * 60 * 1000;
-          const BUFFER_MS = 60 * 1000;
-          const { mode, phaseStartedAt, count } = s.session;
-          const duration = mode === "running" ? POMO_MS : BUFFER_MS;
-          // Manual skip is only valid during buffer (the user clicked
-          // "继续下一个"). Running mode never skips manually — that path
-          // is "结束这一串" and goes through endSession.
-          if (manual && mode === "buffer") {
-            return {
-              session: {
-                ...s.session,
-                mode: "running",
-                count: count + 1,
-                phaseStartedAt: now,
-              },
-            };
-          }
-          // Natural advance: only when the boundary has actually been
-          // crossed. Caller may invoke this on every tick; we no-op
-          // until the wall-clock has passed `phaseStartedAt + duration`.
-          if (now < phaseStartedAt + duration) return s;
-          if (mode === "running") {
-            return {
-              session: {
-                ...s.session,
-                mode: "buffer",
-                phaseStartedAt: phaseStartedAt + duration,
-              },
-            };
+          const { phaseStartedAt, count } = s.session;
+          // No-op until the current pomodoro has actually finished.
+          if (now < phaseStartedAt + POMO_MS) return s;
+          // Multiple boundaries may have crossed during a sleep / tab
+          // throttle; advance until caught up. Both phaseStartedAt and
+          // count step in lockstep so the next tick keeps counting.
+          let nextPhaseStart = phaseStartedAt;
+          let nextCount = count;
+          while (now >= nextPhaseStart + POMO_MS) {
+            nextPhaseStart += POMO_MS;
+            nextCount += 1;
           }
           return {
             session: {
               ...s.session,
-              mode: "running",
-              count: count + 1,
-              phaseStartedAt: phaseStartedAt + duration,
+              phaseStartedAt: nextPhaseStart,
+              count: nextCount,
             },
+          };
+        }),
+
+      updatePomodoroRecord: (id, patch) =>
+        set((s) => {
+          const trimResult =
+            patch.result !== undefined ? patch.result.trim() : undefined;
+          const nextHistory = s.pomodoroHistory.map((r) => {
+            if (r.id !== id) return r;
+            const next = { ...r };
+            if (patch.tag !== undefined) next.tag = patch.tag;
+            if (trimResult !== undefined) {
+              if (trimResult && trimResult !== r.task) next.result = trimResult;
+              else delete next.result;
+            }
+            return next;
+          });
+          // Keep the matching ledger entry's `note` in sync so the journey
+          // tab and ledger reads narrate the same thing.
+          const nextLedger = trimResult !== undefined
+            ? s.tokenHistory.map((e) =>
+                e.pomodoroRecordId === id
+                  ? { ...e, note: trimResult || e.note }
+                  : e,
+              )
+            : s.tokenHistory;
+          return {
+            pomodoroHistory: nextHistory,
+            tokenHistory: nextLedger,
+          };
+        }),
+
+      deletePomodoroRecord: (id) =>
+        set((s) => {
+          const record = s.pomodoroHistory.find((r) => r.id === id);
+          if (!record) return s;
+          const nextHistory = s.pomodoroHistory.filter((r) => r.id !== id);
+          const nextLedger = s.tokenHistory.filter(
+            (e) => e.pomodoroRecordId !== id,
+          );
+          const reverseF = (record.fGained ?? 0) + (record.bonusF ?? 0);
+          // Today-counter rollback only when the deleted record belongs
+          // to the active day — older records have already aged out of
+          // these counters.
+          const isToday = record.dayKey === todayKey();
+          const baseTagCount = s.todayCountsByTag[record.tag] ?? 0;
+          const nextTagCount = Math.max(0, baseTagCount - record.count);
+          const nextCounts = isToday
+            ? { ...s.todayCountsByTag, [record.tag]: nextTagCount }
+            : s.todayCountsByTag;
+          return {
+            pomodoroHistory: nextHistory,
+            tokenHistory: nextLedger,
+            ftoken: round(clamp(s.ftoken - reverseF)),
+            todayPomos: isToday
+              ? Math.max(0, s.todayPomos - record.count)
+              : s.todayPomos,
+            todayCountsByTag: nextCounts,
+            todayFGained: isToday
+              ? round(Math.max(0, s.todayFGained - reverseF))
+              : s.todayFGained,
           };
         }),
 
@@ -765,7 +805,6 @@ export const useStore = create<Store>()(
           const totalFGain = fGain + bonusF;
           // Update recents
           const taskName = data?.result?.trim() || s.session.task;
-          const kanbanCardId = data?.kanbanCardId ?? s.session.kanbanCardId;
           const filtered = s.recentTasks.filter((t) => t !== taskName);
           const recentTasks = [taskName, ...filtered].slice(0, 5);
           const endedAt = Date.now();
@@ -774,7 +813,6 @@ export const useStore = create<Store>()(
                 id: `p-${endedAt}-${Math.random().toString(36).slice(2, 6)}`,
                 task: s.session.task,
                 ...(taskName !== s.session.task ? { result: taskName } : {}),
-                ...(kanbanCardId ? { kanbanCardId } : {}),
                 tag: s.session.tag,
                 type: s.session.type,
                 count: completedCount,
@@ -1042,7 +1080,7 @@ export const useStore = create<Store>()(
     },
     {
       name: "tokmato:state",
-      version: 8,
+      version: 9,
       // v1 → v2: replace single-slot welcomeGrantUserId with an array so
       // alternating accounts on the same device can't farm welcome bonuses.
       // v2 → v3: add session.phaseStartedAt for clock-based timer.
@@ -1072,6 +1110,11 @@ export const useStore = create<Store>()(
       //          (cancelPushChain + clearActiveSession) — without it a
       //          mid-session upgrade would orphan the QStash chain and
       //          the cross-device active marker.
+      // v8 → v9: drop the running/buffer phase split. Pomodoros now roll
+      //          continuously every 25 min. A live session caught mid-
+      //          buffer is promoted to the next pomodoro at upgrade time
+      //          (count++, phaseStartedAt = now); a live running session
+      //          just sheds the now-vestigial mode field.
       migrate: (persistedState, version) => {
         if (version < 8) {
           try {
@@ -1085,6 +1128,21 @@ export const useStore = create<Store>()(
           return persistedState as Partial<UserState>;
         }
         const state = persistedState as Record<string, unknown>;
+        if (version < 9) {
+          const sess = state.session as Record<string, unknown> | null | undefined;
+          if (sess && typeof sess === "object") {
+            if (sess.mode === "buffer") {
+              // The user was in the legacy 60s buffer when the upgrade
+              // landed. Treat that as "the next pomodoro just started" so
+              // the timer keeps moving forward instead of stalling on a
+              // mode the new model no longer understands.
+              sess.count =
+                typeof sess.count === "number" ? sess.count + 1 : 1;
+              sess.phaseStartedAt = Date.now();
+            }
+            delete sess.mode;
+          }
+        }
         if (version < 2) {
           const legacy = state.welcomeGrantUserId;
           state.welcomeGrantedUserIds =

@@ -57,7 +57,6 @@ describe("persistedSnapshotSchema — happy path", () => {
       startedAt: 1_700_000_000_000,
       phaseStartedAt: 1_700_000_000_000,
       count: 3,
-      mode: "running",
       notes: ["卡在第 3 题"],
     } as never;
     snap.playSession = {
@@ -78,7 +77,21 @@ describe("persistedSnapshotSchema — happy path", () => {
       startedAt: 1_700_000_000_000,
       // no phaseStartedAt — should be allowed (optional)
       count: 1,
-      mode: "running",
+      notes: [],
+    } as never;
+    expect(persistedSnapshotSchema.safeParse(snap).success).toBe(true);
+  });
+
+  it("accepts a v8 session with the legacy mode field (back-compat)", () => {
+    const snap = validSnapshot();
+    snap.session = {
+      task: "刷题",
+      tag: "math",
+      type: "input",
+      startedAt: 1_700_000_000_000,
+      phaseStartedAt: 1_700_000_000_000,
+      count: 1,
+      mode: "buffer",
       notes: [],
     } as never;
     expect(persistedSnapshotSchema.safeParse(snap).success).toBe(true);
@@ -127,7 +140,6 @@ describe("persistedSnapshotSchema — strictness", () => {
       startedAt: 1,
       phaseStartedAt: 1,
       count: 1,
-      mode: "running",
       notes: [],
     } as never;
     expect(persistedSnapshotSchema.safeParse(snap).success).toBe(false);
@@ -142,7 +154,6 @@ describe("persistedSnapshotSchema — strictness", () => {
       startedAt: 1,
       phaseStartedAt: 1,
       count: 1,
-      mode: "running",
       notes: [],
     } as never;
     expect(persistedSnapshotSchema.safeParse(snap).success).toBe(true);

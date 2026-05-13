@@ -10,9 +10,8 @@
 import { useEffect, useState } from "react";
 import { Play } from "lucide-react";
 import { ResponsiveSheet } from "@/components/ui/responsive-sheet";
-import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
-import type { KanbanCard, KanbanColumnId, PlayType } from "@/lib/types";
+import type { PlayType } from "@/lib/types";
 
 export interface PlaySheetProps {
   open: boolean;
@@ -23,8 +22,6 @@ export interface PlaySheetProps {
     minutes: number;
     costMinutes: number;
     type: PlayType;
-    task?: string;
-    kanbanCardId?: string;
   }) => void;
 }
 
@@ -32,26 +29,14 @@ const MIN_MINUTES = 5;
 const ACTIVE_MAX = 240; // 4h
 const PASSIVE_MAX = 120; // 2h (cost ×2 → still 4h pool)
 
-const COL_LABEL: Record<KanbanColumnId, string> = {
-  inbox: "Inbox",
-  Q1: "Q1",
-  Q2: "Q2",
-  Q3: "Q3",
-  Q4: "Q4",
-};
-
 export function PlaySheet({
   open,
   onOpenChange,
   timePool,
   onConfirm,
 }: PlaySheetProps) {
-  const kanban = useStore((s) => s.kanban);
-  const kanbanCards = (Object.entries(kanban) as [KanbanColumnId, KanbanCard[]][])
-    .flatMap(([col, cards]) => cards.map((card) => ({ col, card })));
   const [type, setType] = useState<PlayType>("active");
   const [minutes, setMinutes] = useState(30);
-  const [kanbanCardId, setKanbanCardId] = useState<string | undefined>(undefined);
 
   const typeMax = type === "active" ? ACTIVE_MAX : PASSIVE_MAX;
   const sliderMax = Math.max(MIN_MINUTES, Math.min(typeMax, costAvail(type, timePool)));
@@ -68,18 +53,11 @@ export function PlaySheet({
   useEffect(() => {
     if (!open) return;
     setMinutes((m) => Math.max(MIN_MINUTES, Math.min(m, sliderMax)));
-    setKanbanCardId(undefined);
   }, [open, sliderMax]);
 
   const handleConfirm = () => {
     if (overBudget || poolEmpty) return;
-    const card = kanbanCards.find((item) => item.card.id === kanbanCardId)?.card;
-    onConfirm({
-      minutes,
-      costMinutes: cost,
-      type,
-      ...(card ? { task: card.name, kanbanCardId: card.id } : {}),
-    });
+    onConfirm({ minutes, costMinutes: cost, type });
     onOpenChange(false);
   };
 
@@ -164,36 +142,6 @@ export function PlaySheet({
           />
         </div>
       </div>
-
-      {kanbanCards.length > 0 && (
-        <div className="mt-7">
-          <div className="smallcaps mb-3">绑定 Kanban</div>
-          <label className="block">
-            <span className="sr-only">绑定 Kanban 任务</span>
-            <select
-              value={kanbanCardId ?? ""}
-              onChange={(e) => setKanbanCardId(e.target.value || undefined)}
-              className={cn(
-                "min-h-11 w-full min-w-0 rounded-lg border border-rule bg-paper px-3 text-[13px] text-ink",
-                "overflow-hidden text-ellipsis whitespace-nowrap",
-                "focus:border-teal focus:outline-none focus-visible:ring-2 focus-visible:ring-teal/30"
-              )}
-            >
-              <option value="">不绑定</option>
-              {kanbanCards.map(({ col, card }) => {
-                return (
-                  <option
-                    key={card.id}
-                    value={card.id}
-                  >
-                    {COL_LABEL[col]} / {card.name}
-                  </option>
-                );
-              })}
-            </select>
-          </label>
-        </div>
-      )}
 
       {/* Confirm */}
       <div className="mt-7 flex items-center justify-end gap-3">

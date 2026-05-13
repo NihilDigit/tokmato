@@ -45,17 +45,14 @@ export interface BonusConfig {
 }
 
 export type SessionType = "input" | "output";
-export type SessionMode = "running" | "buffer";
 
 export interface PomodoroSession {
   task: string;
-  kanbanCardId?: string;
   tag: TagId;
   type: SessionType;
   startedAt: number;       // ms epoch — session start (immutable)
-  phaseStartedAt: number;  // ms epoch — current phase (running/buffer) start
+  phaseStartedAt: number;  // ms epoch — current pomodoro start
   count: number;           // 1-based current pomodoro number
-  mode: SessionMode;       // current phase
   notes: string[];
 }
 
@@ -63,7 +60,6 @@ export interface PomodoroRecord {
   id: string;
   task: string;
   result?: string;
-  kanbanCardId?: string;
   tag: TagId;
   type: SessionType;
   count: number;
@@ -197,7 +193,6 @@ export type PlayType = "active" | "passive";
 export interface PlaySession {
   type: PlayType;
   task?: string;
-  kanbanCardId?: string;
   totalMinutes: number; // visible timer duration
   costMinutes: number; // time-pool minutes deducted up front
   startedAt: number;    // ms epoch

@@ -193,14 +193,13 @@ describe("endSession", () => {
     expect(after.pomodoroHistory.length).toBe(0);
   });
 
-  it("starts a session with running mode, count 1, and empty notes", () => {
+  it("starts a session with count 1 and empty notes", () => {
     s().startSession({ task: "刷题", tag: "cs", type: "input" });
     expect(s().session).toMatchObject({
       task: "刷题",
       tag: "cs",
       type: "input",
       count: 1,
-      mode: "running",
       notes: [],
     });
   });
@@ -335,58 +334,114 @@ describe("endSession", () => {
 });
 
 // ===========================================================================
-// advancePomodoroPhase
+// updatePomodoroRecord / deletePomodoroRecord
+// ===========================================================================
+describe("pomodoro record edit / delete", () => {
+  it("updatePomodoroRecord retags and rewrites the result label", () => {
+    s().startSession({ task: "刷题", tag: "math", type: "input" });
+    s().endSession({ completedCount: 1, result: "做了 1-5 题" });
+    const rec = s().pomodoroHistory[0];
+    s().updatePomodoroRecord(rec.id, { tag: "cs", result: "实际改成了写代码" });
+    const after = s().pomodoroHistory[0];
+    expect(after.tag).toBe("cs");
+    expect(after.result).toBe("实际改成了写代码");
+    // Linked ledger entry's note follows the new result.
+    const ledger = s().tokenHistory.find((e) => e.pomodoroRecordId === rec.id);
+    expect(ledger?.note).toBe("实际改成了写代码");
+  });
+
+  it("updatePomodoroRecord clears `result` when set back to the task name", () => {
+    s().startSession({ task: "刷题", tag: "math", type: "input" });
+    s().endSession({ completedCount: 1, result: "first label" });
+    const rec = s().pomodoroHistory[0];
+    s().updatePomodoroRecord(rec.id, { result: "刷题" });
+    const after = s().pomodoroHistory[0];
+    expect(after.result).toBeUndefined();
+  });
+
+  it("deletePomodoroRecord reverses fGained + bonusF and removes the ledger entry", () => {
+    s().startSession({ task: "刷题", tag: "math", type: "input" });
+    s().endSession({ completedCount: 3 });
+    const rec = s().pomodoroHistory[0];
+    const fBefore = s().ftoken;
+    const ledgerCountBefore = s().tokenHistory.length;
+    s().deletePomodoroRecord(rec.id);
+    expect(s().pomodoroHistory.find((r) => r.id === rec.id)).toBeUndefined();
+    expect(
+      s().tokenHistory.find((e) => e.pomodoroRecordId === rec.id),
+    ).toBeUndefined();
+    expect(s().tokenHistory.length).toBe(ledgerCountBefore - 1);
+    expect(s().ftoken).toBe(
+      Math.max(0, Math.round((fBefore - rec.fGained - rec.bonusF) * 10) / 10),
+    );
+  });
+
+  it("deletePomodoroRecord rolls back today's per-tag and total counters", () => {
+    s().startSession({ task: "刷题", tag: "math", type: "input" });
+    s().endSession({ completedCount: 2 });
+    expect(s().todayPomos).toBe(2);
+    expect(s().todayCountsByTag.math).toBe(2);
+    const rec = s().pomodoroHistory[0];
+    s().deletePomodoroRecord(rec.id);
+    expect(s().todayPomos).toBe(0);
+    expect(s().todayCountsByTag.math).toBe(0);
+    expect(s().todayFGained).toBe(0);
+  });
+
+  it("deletePomodoroRecord on an older-day record leaves today's counters alone", () => {
+    s().startSession({ task: "刷题", tag: "math", type: "input" });
+    s().endSession({ completedCount: 2 });
+    // Hand-edit the dayKey backward to simulate a record from yesterday.
+    const rec = s().pomodoroHistory[0];
+    useStore.setState({
+      pomodoroHistory: s().pomodoroHistory.map((r) =>
+        r.id === rec.id ? { ...r, dayKey: "1999-01-01" } : r,
+      ),
+      // Today counters stay intact regardless — they reflect the active
+      // day, not whatever this record's dayKey is.
+      todayPomos: 5,
+      todayCountsByTag: { math: 5 },
+    });
+    s().deletePomodoroRecord(rec.id);
+    expect(s().todayPomos).toBe(5);
+    expect(s().todayCountsByTag.math).toBe(5);
+  });
+});
+
+// ===========================================================================
+// advancePomodoroPhase — v9 single-phase auto-advance
 // ===========================================================================
 describe("advancePomodoroPhase", () => {
   const POMO_MS = 25 * 60 * 1000;
-  const BUFFER_MS = 60 * 1000;
 
   it("is a no-op without an active session", () => {
     s().advancePomodoroPhase({ now: 9_999_999_999 });
     expect(s().session).toBeNull();
   });
 
-  it("running → buffer when boundary has been reached", () => {
+  it("does nothing before the 25-minute boundary", () => {
     s().startSession({ task: "刷题", tag: "cs", type: "input" });
     const start = s().session!.phaseStartedAt;
-    // Just before the boundary — no advance yet.
     s().advancePomodoroPhase({ now: start + POMO_MS - 1 });
-    expect(s().session!.mode).toBe("running");
+    expect(s().session!.count).toBe(1);
+    expect(s().session!.phaseStartedAt).toBe(start);
+  });
 
+  it("rolls forward exactly one pomodoro at the boundary", () => {
+    s().startSession({ task: "刷题", tag: "cs", type: "input" });
+    const start = s().session!.phaseStartedAt;
     s().advancePomodoroPhase({ now: start + POMO_MS });
-    expect(s().session!.mode).toBe("buffer");
+    expect(s().session!.count).toBe(2);
     expect(s().session!.phaseStartedAt).toBe(start + POMO_MS);
-    expect(s().session!.count).toBe(1);
   });
 
-  it("buffer → running auto-advance bumps count and shifts phaseStartedAt by BUFFER_MS", () => {
+  it("catches up multiple boundaries crossed during a sleep", () => {
     s().startSession({ task: "刷题", tag: "cs", type: "input" });
     const start = s().session!.phaseStartedAt;
-    s().advancePomodoroPhase({ now: start + POMO_MS }); // → buffer
-    s().advancePomodoroPhase({ now: start + POMO_MS + BUFFER_MS });
-    expect(s().session!.mode).toBe("running");
-    expect(s().session!.count).toBe(2);
-    expect(s().session!.phaseStartedAt).toBe(start + POMO_MS + BUFFER_MS);
-  });
-
-  it("manual buffer skip resets phaseStartedAt to `now` instead of natural boundary", () => {
-    s().startSession({ task: "刷题", tag: "cs", type: "input" });
-    const start = s().session!.phaseStartedAt;
-    s().advancePomodoroPhase({ now: start + POMO_MS }); // → buffer
-    // User clicks "继续下一个" 30s into buffer — pomodoro should restart from now.
-    const skipAt = start + POMO_MS + 30_000;
-    s().advancePomodoroPhase({ manual: true, now: skipAt });
-    expect(s().session!.mode).toBe("running");
-    expect(s().session!.count).toBe(2);
-    expect(s().session!.phaseStartedAt).toBe(skipAt);
-  });
-
-  it("manual flag is ignored during running mode", () => {
-    s().startSession({ task: "刷题", tag: "cs", type: "input" });
-    const start = s().session!.phaseStartedAt;
-    s().advancePomodoroPhase({ manual: true, now: start + 1_000 });
-    expect(s().session!.mode).toBe("running");
-    expect(s().session!.count).toBe(1);
+    // Tab was throttled across three full pomodoros.
+    s().advancePomodoroPhase({ now: start + 3 * POMO_MS + 5 });
+    expect(s().session!.count).toBe(4);
+    expect(s().session!.phaseStartedAt).toBe(start + 3 * POMO_MS);
   });
 });
 
@@ -1178,11 +1233,11 @@ describe("applyMergedSnapshot", () => {
     const localSession = {
       task: "deep work",
       tag: "study",
-      type: "input",
-      mode: "running" as const,
+      type: "input" as const,
       startedAt: NOW,
       phaseStartedAt: NOW,
       count: 1,
+      notes: [],
     };
     useStore.setState({
       session: localSession,
@@ -1203,11 +1258,11 @@ describe("applyMergedSnapshot", () => {
     const cloudSession = {
       task: "from another device",
       tag: "study",
-      type: "input",
-      mode: "running" as const,
+      type: "input" as const,
       startedAt: NOW - 60_000,
       phaseStartedAt: NOW - 60_000,
       count: 1,
+      notes: [],
     };
     useStore.setState({ session: null });
     s().applyMergedSnapshot(
@@ -1270,7 +1325,6 @@ describe("applyMergedSnapshot", () => {
       task: "deep work",
       tag: "study",
       type: "input" as const,
-      mode: "running" as const,
       startedAt: NOW,
       phaseStartedAt: NOW,
       count: 1,

@@ -42,7 +42,6 @@ const tagColor = z.enum([
   "slate",
 ]);
 const sessionType = z.enum(["input", "output"]);
-const sessionMode = z.enum(["running", "buffer"]);
 const playType = z.enum(["active", "passive"]);
 
 const dayKey = z
@@ -76,6 +75,7 @@ const bonusConfig = z.object({
 
 const pomodoroSession = z.object({
   task: z.string().max(STR_MED),
+  // v9: kanbanCardId removed; accept-and-ignore for older cloud snapshots.
   kanbanCardId: z.string().max(STR_SHORT).optional(),
   tag: tagId,
   type: sessionType,
@@ -83,13 +83,16 @@ const pomodoroSession = z.object({
   // Optional for state migrated from v2; back-fills via store migration.
   phaseStartedAt: epochMs.optional(),
   count: nonNegInt.max(1_000),
-  mode: sessionMode,
+  // v9 dropped the running/buffer phase split — kept optional here so cloud
+  // snapshots from older clients still parse; the value is ignored on load.
+  mode: z.enum(["running", "buffer"]).optional(),
   notes: z.array(z.string().max(STR_MED)).max(ARR_SMALL),
 });
 
 const playSession = z.object({
   type: playType,
   task: z.string().max(STR_MED).optional(),
+  // v9: kanbanCardId removed; accept-and-ignore for older cloud snapshots.
   kanbanCardId: z.string().max(STR_SHORT).optional(),
   totalMinutes: minuteAmount,
   costMinutes: minuteAmount,
@@ -100,6 +103,7 @@ const pomodoroRecord = z.object({
   id,
   task: z.string().max(STR_MED),
   result: z.string().max(STR_MED).optional(),
+  // v9: kanbanCardId removed; accept-and-ignore for older cloud records.
   kanbanCardId: z.string().max(STR_SHORT).optional(),
   tag: tagId,
   type: sessionType,

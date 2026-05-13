@@ -16,7 +16,7 @@ import { ResponsiveSheet } from "@/components/ui/responsive-sheet";
 import { useStore } from "@/lib/store";
 import { TAG_CHIP_CLASSES } from "@/lib/tag-colors";
 import { cn } from "@/lib/utils";
-import type { KanbanCard, KanbanColumnId, TagId, SessionType } from "@/lib/types";
+import type { TagId, SessionType } from "@/lib/types";
 
 export interface StartSheetProps {
   open: boolean;
@@ -29,7 +29,6 @@ export interface StartSheetProps {
     task: string;
     tag: TagId;
     type: SessionType;
-    kanbanCardId?: string;
   }) => void;
 }
 
@@ -45,14 +44,6 @@ const TYPE_OPTIONS: TypeOptionDef[] = [
   { id: "output", label: "输出型", sub: "做 / 写 / 练 / 产出", rate: "+0.5 F / 番茄" },
 ];
 
-const COL_LABEL: Record<KanbanColumnId, string> = {
-  inbox: "Inbox",
-  Q1: "Q1",
-  Q2: "Q2",
-  Q3: "Q3",
-  Q4: "Q4",
-};
-
 export function StartSheet({
   open,
   onOpenChange,
@@ -61,13 +52,9 @@ export function StartSheet({
   onConfirm,
 }: StartSheetProps) {
   const tags = useStore((s) => s.tags);
-  const kanban = useStore((s) => s.kanban);
-  const kanbanCards = (Object.entries(kanban) as [KanbanColumnId, KanbanCard[]][])
-    .flatMap(([col, cards]) => cards.map((card) => ({ col, card })));
   // Default to math if it exists (preserves v1.7 default), else first tag.
   const defaultTagId = tags.find((t) => t.id === "math")?.id ?? tags[0]?.id ?? "";
   const [task, setTask] = useState(initialTask ?? "");
-  const [kanbanCardId, setKanbanCardId] = useState<string | undefined>(undefined);
   const [tag, setTag] = useState<TagId>(defaultTagId);
   const [type, setType] = useState<SessionType>("input");
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -77,7 +64,6 @@ export function StartSheet({
   useEffect(() => {
     if (!open) return;
     setTask(initialTask ?? "");
-    setKanbanCardId(undefined);
     // If the previously-selected tag was deleted while the sheet was
     // closed, fall back to the default.
     if (!tags.some((t) => t.id === tag)) {
@@ -92,7 +78,7 @@ export function StartSheet({
 
   const handleConfirm = () => {
     if (!canStart) return;
-    onConfirm({ task: task.trim(), tag, type, kanbanCardId });
+    onConfirm({ task: task.trim(), tag, type });
   };
 
   return (
@@ -141,7 +127,6 @@ export function StartSheet({
                   type="button"
                   onClick={() => {
                     setTask(t);
-                    setKanbanCardId(undefined);
                     inputRef.current?.focus();
                   }}
                   className={cn(
@@ -154,50 +139,6 @@ export function StartSheet({
                   {t}
                 </button>
               ))}
-            </div>
-          </div>
-        )}
-
-        {kanbanCards.length > 0 && (
-          <div>
-            <div className="smallcaps mb-2">绑定 Kanban</div>
-            <div className="flex max-h-32 flex-col gap-1.5 overflow-y-auto pr-1">
-              <button
-                type="button"
-                onClick={() => setKanbanCardId(undefined)}
-                className={cn(
-                  "flex min-h-9 items-center justify-between rounded-lg border px-3 text-left text-[13px] transition",
-                  kanbanCardId === undefined
-                    ? "border-ink bg-ink/4 text-ink"
-                    : "border-rule text-ink-3 hover:border-ink/30 hover:text-ink"
-                )}
-              >
-                <span>不绑定</span>
-              </button>
-              {kanbanCards.map(({ col, card }) => {
-                const selected = kanbanCardId === card.id;
-                return (
-                  <button
-                    key={card.id}
-                    type="button"
-                    onClick={() => {
-                      setKanbanCardId(card.id);
-                      setTask(card.name);
-                    }}
-                    className={cn(
-                      "flex min-h-10 items-center justify-between gap-3 rounded-lg border px-3 text-left transition",
-                      selected
-                        ? "border-tomato bg-tomato/10 text-ink"
-                        : "border-rule text-ink-2 hover:border-tomato/30"
-                    )}
-                  >
-                    <span className="min-w-0 truncate text-[13px]">{card.name}</span>
-                    <span className="mono shrink-0 text-[11px] text-ink-mute">
-                      {COL_LABEL[col]}
-                    </span>
-                  </button>
-                );
-              })}
             </div>
           </div>
         )}

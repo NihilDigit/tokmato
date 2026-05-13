@@ -56,10 +56,10 @@ const startChainSchema = z.object({
   sessionId: z.string().min(1).max(100),
   /** Wall-clock ms when the next notification should fire. */
   boundaryAt: z.number().int().positive(),
-  /** "running-end" / "buffer-end" chain across phases for pomodoro;
+  /** "running-end" chains every 25 min for the pomodoro session;
    *  "play-end" is single-fire — the route handler does not chain
    *  another link after delivering it. */
-  kind: z.enum(["running-end", "buffer-end", "play-end"]),
+  kind: z.enum(["running-end", "play-end"]),
   count: z.number().int().min(1).max(1000),
 });
 
