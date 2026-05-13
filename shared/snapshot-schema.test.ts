@@ -37,6 +37,7 @@ function validSnapshot() {
     wishlist: [],
     achievements: [],
     kanban: { inbox: [], Q1: [], Q2: [], Q3: [], Q4: [] },
+    kanbanDeletedCardIds: [],
     recentTasks: [],
     foodPresets: [],
   };
@@ -88,6 +89,14 @@ describe("persistedSnapshotSchema — v1.7 backward compat", () => {
   it("accepts a snapshot from a v1.7 client that still emits guideSeenUserIds", () => {
     const snap = validSnapshot() as Record<string, unknown>;
     snap.guideSeenUserIds = ["user-a"];
+    expect(persistedSnapshotSchema.safeParse(snap).success).toBe(true);
+  });
+});
+
+describe("persistedSnapshotSchema — v2.x backward compat", () => {
+  it("accepts snapshots without kanban delete tombstones", () => {
+    const snap = validSnapshot() as Record<string, unknown>;
+    delete snap.kanbanDeletedCardIds;
     expect(persistedSnapshotSchema.safeParse(snap).success).toBe(true);
   });
 });

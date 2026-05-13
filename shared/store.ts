@@ -97,6 +97,7 @@ function createStarterState(): UserState {
       Q3: [],
       Q4: [],
     },
+    kanbanDeletedCardIds: [],
     recentTasks: [],
     foodPresets: [
       { id: "fp1", name: "可乐", price: 3.5 },
@@ -168,6 +169,50 @@ function normalizeDay(s: Store): Partial<UserState> {
     todayHGained: 0,
     todayPoolGained: 0,
   };
+}
+
+const KANBAN_COLS: KanbanColumnId[] = ["inbox", "Q1", "Q2", "Q3", "Q4"];
+
+function uniqueStrings(ids: string[] = []): string[] {
+  return Array.from(new Set(ids));
+}
+
+function filterDeletedKanban(
+  kanban: UserState["kanban"],
+  deletedIds: Set<string>,
+): UserState["kanban"] {
+  return {
+    inbox: kanban.inbox.filter((c) => !deletedIds.has(c.id)),
+    Q1: kanban.Q1.filter((c) => !deletedIds.has(c.id)),
+    Q2: kanban.Q2.filter((c) => !deletedIds.has(c.id)),
+    Q3: kanban.Q3.filter((c) => !deletedIds.has(c.id)),
+    Q4: kanban.Q4.filter((c) => !deletedIds.has(c.id)),
+  };
+}
+
+function mergeKanbanByCardId(
+  local: UserState["kanban"],
+  cloud: UserState["kanban"],
+): UserState["kanban"] {
+  const byId = new Map<string, { col: KanbanColumnId; card: KanbanCard }>();
+  for (const col of KANBAN_COLS) {
+    for (const card of local[col]) byId.set(card.id, { col, card });
+  }
+  for (const col of KANBAN_COLS) {
+    for (const card of cloud[col]) byId.set(card.id, { col, card });
+  }
+
+  const merged: UserState["kanban"] = {
+    inbox: [],
+    Q1: [],
+    Q2: [],
+    Q3: [],
+    Q4: [],
+  };
+  for (const { col, card } of byId.values()) {
+    merged[col].push(card);
+  }
+  return merged;
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -363,7 +408,16 @@ export const useStore = create<Store>()(
           const ftoken = round(rawF);
           const htoken = round(rawH);
           const timePool = clamp(rawPool);
-          const cloudKanban = cloud.kanban ?? local.kanban;
+          const kanbanDeletedCardIds = uniqueStrings([
+            ...(local.kanbanDeletedCardIds ?? []),
+            ...(cloud.kanbanDeletedCardIds ?? []),
+          ]);
+          const deletedKanbanCards = new Set(kanbanDeletedCardIds);
+          const localKanban = filterDeletedKanban(local.kanban, deletedKanbanCards);
+          const cloudKanban = filterDeletedKanban(
+            cloud.kanban ?? local.kanban,
+            deletedKanbanCards,
+          );
           // Recompute today's per-axis / per-tag counters from the merged
           // pomodoro + ledger history rather than trusting cloud's snapshot
           // values. Cloud's snapshot may have been taken before some local
@@ -415,13 +469,8 @@ export const useStore = create<Store>()(
             foodPresets: dedupBy(local.foodPresets, cloud.foodPresets ?? []),
             tags: dedupBy(local.tags, cloud.tags ?? []),
             bonuses: dedupBy(local.bonuses, cloud.bonuses ?? []),
-            kanban: {
-              inbox: dedupBy(local.kanban.inbox, cloudKanban.inbox ?? []),
-              Q1: dedupBy(local.kanban.Q1, cloudKanban.Q1 ?? []),
-              Q2: dedupBy(local.kanban.Q2, cloudKanban.Q2 ?? []),
-              Q3: dedupBy(local.kanban.Q3, cloudKanban.Q3 ?? []),
-              Q4: dedupBy(local.kanban.Q4, cloudKanban.Q4 ?? []),
-            },
+            kanban: mergeKanbanByCardId(localKanban, cloudKanban),
+            kanbanDeletedCardIds,
             recentTasks: Array.from(
               new Set([...local.recentTasks, ...(cloud.recentTasks ?? [])]),
             ).slice(0, 5),
@@ -775,9 +824,10 @@ export const useStore = create<Store>()(
 
       moveKanbanCard: ({ cardId, toCol }) =>
         set((s) => {
+          if ((s.kanbanDeletedCardIds ?? []).includes(cardId)) return s;
           let moved: KanbanCard | null = null;
           const next = { ...s.kanban };
-          (Object.keys(next) as KanbanColumnId[]).forEach((cid) => {
+          KANBAN_COLS.forEach((cid) => {
             const found = next[cid].find((c) => c.id === cardId);
             if (found) moved = found;
             next[cid] = next[cid].filter((c) => c.id !== cardId);
@@ -791,12 +841,16 @@ export const useStore = create<Store>()(
         set((s) => ({
           ...normalizeDay(s),
           kanban: { ...s.kanban, [col]: [...s.kanban[col], card] },
+          kanbanDeletedCardIds: (s.kanbanDeletedCardIds ?? []).filter(
+            (id) => id !== card.id,
+          ),
         })),
 
       updateKanbanCard: ({ cardId, patch }) =>
         set((s) => {
+          if ((s.kanbanDeletedCardIds ?? []).includes(cardId)) return s;
           const next = { ...s.kanban };
-          (Object.keys(next) as KanbanColumnId[]).forEach((cid) => {
+          KANBAN_COLS.forEach((cid) => {
             next[cid] = next[cid].map((c) => {
               if (c.id !== cardId) return c;
               const nextName = patch.name !== undefined ? patch.name.trim() : c.name;
@@ -814,10 +868,16 @@ export const useStore = create<Store>()(
       removeKanbanCard: (cardId) =>
         set((s) => {
           const next = { ...s.kanban };
-          (Object.keys(next) as KanbanColumnId[]).forEach((cid) => {
+          KANBAN_COLS.forEach((cid) => {
             next[cid] = next[cid].filter((c) => c.id !== cardId);
           });
-          return { kanban: next };
+          return {
+            kanban: next,
+            kanbanDeletedCardIds: uniqueStrings([
+              ...(s.kanbanDeletedCardIds ?? []),
+              cardId,
+            ]).slice(-500),
+          };
         }),
 
       addFoodPreset: ({ name, price }) =>
@@ -1118,6 +1178,7 @@ export function selectSnapshot(s: UserState): Partial<UserState> {
     wishlist: s.wishlist,
     achievements: s.achievements,
     kanban: s.kanban,
+    kanbanDeletedCardIds: s.kanbanDeletedCardIds,
     recentTasks: s.recentTasks,
     foodPresets: s.foodPresets,
   };

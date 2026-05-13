@@ -616,6 +616,13 @@ describe("moveKanbanCard", () => {
     expect(s().kanban.Q1.find((c) => c.id === "c1")).toBeUndefined();
     expect(s().kanban.Q3.find((c) => c.id === "c1")).toBeDefined();
   });
+
+  it("records a tombstone when a card is removed", () => {
+    seedCard("Q1", "c1");
+    s().removeKanbanCard("c1");
+    expect(s().kanban.Q1.find((c) => c.id === "c1")).toBeUndefined();
+    expect(s().kanbanDeletedCardIds).toContain("c1");
+  });
 });
 
 // ===========================================================================
@@ -1057,6 +1064,70 @@ describe("applyMergedSnapshot", () => {
     expect(s().wishlist.find((w) => w.id === "w-1")?.name).toBe("云端"); // cloud wins
     expect(s().foodPresets.map((p) => p.id).sort()).toEqual(["fp-cloud", "fp-shared"]);
     expect(s().kanban.inbox.map((c) => c.id).sort()).toEqual(["k1", "k2"]);
+  });
+
+  it("does not resurrect kanban cards deleted on another device", () => {
+    useStore.setState({
+      kanban: {
+        inbox: [{ id: "k-deleted", name: "旧设备残留" }],
+        Q1: [{ id: "k-local", name: "本地保留" }],
+        Q2: [],
+        Q3: [],
+        Q4: [],
+      },
+      kanbanDeletedCardIds: [],
+    });
+
+    s().applyMergedSnapshot(
+      {
+        kanban: {
+          inbox: [],
+          Q1: [],
+          Q2: [{ id: "k-cloud", name: "云端保留" }],
+          Q3: [],
+          Q4: [],
+        },
+        kanbanDeletedCardIds: ["k-deleted"],
+      },
+      2000,
+    );
+
+    const allCards = Object.values(s().kanban).flat();
+    expect(allCards.map((c) => c.id).sort()).toEqual(["k-cloud", "k-local"]);
+    expect(s().kanbanDeletedCardIds).toContain("k-deleted");
+  });
+
+  it("keeps a moved kanban card in one cloud-winning column", () => {
+    useStore.setState({
+      kanban: {
+        inbox: [],
+        Q1: [{ id: "k-moved", name: "本地旧列" }],
+        Q2: [],
+        Q3: [],
+        Q4: [],
+      },
+    });
+
+    s().applyMergedSnapshot(
+      {
+        kanban: {
+          inbox: [],
+          Q1: [],
+          Q2: [{ id: "k-moved", name: "云端新列" }],
+          Q3: [],
+          Q4: [],
+        },
+      },
+      2000,
+    );
+
+    expect(s().kanban.Q1.find((c) => c.id === "k-moved")).toBeUndefined();
+    expect(s().kanban.Q2.find((c) => c.id === "k-moved")?.name).toBe("云端新列");
+    expect(
+      Object.values(s().kanban)
+        .flat()
+        .filter((c) => c.id === "k-moved"),
+    ).toHaveLength(1);
   });
 
   it("does NOT double when local has same-id entries as cloud and lastSavedAt=0 (sign-in race)", () => {

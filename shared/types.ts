@@ -187,6 +187,7 @@ export interface UserState {
   wishlist: WishlistItem[];
   achievements: AchievementItem[];
   kanban: KanbanState;
+  kanbanDeletedCardIds: string[];
   recentTasks: string[];
   foodPresets: FoodPreset[];
 }

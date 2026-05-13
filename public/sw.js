@@ -1,18 +1,129 @@
-// tokmato service worker — handles Web Push delivery.
+// tokmato service worker — app-shell caching + Web Push delivery.
 //
 // QStash → /api/push/fire → web-push (VAPID) → push provider → here.
-// We only do two things: render the notification, and focus the app
-// when the user clicks it. Everything else (timers, scheduling) is
-// either client-side wall-clock or server-side QStash.
+// Push handling stays independent from the fetch cache below.
+
+const STATIC_CACHE = "tokmato-static-v1";
+const PAGE_CACHE = "tokmato-pages-v1";
+const STATIC_PATHS = [
+  "/",
+  "/home",
+  "/journey",
+  "/redeem",
+  "/kanban",
+  "/settings",
+  "/manifest.webmanifest",
+  "/icon.png",
+  "/apple-icon.png",
+  "/icon-192.png",
+  "/icon-512.png",
+  "/apple-touch-icon.png",
+];
+
+function isSameOrigin(request) {
+  return new URL(request.url).origin === self.location.origin;
+}
+
+function isNextStatic(request) {
+  return new URL(request.url).pathname.startsWith("/_next/static/");
+}
+
+function isPublicAsset(request) {
+  const pathname = new URL(request.url).pathname;
+  return STATIC_PATHS.includes(pathname);
+}
+
+function shouldCacheResponse(response) {
+  return response && response.ok && response.type === "basic";
+}
+
+async function cacheFirst(request, cacheName) {
+  const cache = await caches.open(cacheName);
+  const cached = await cache.match(request);
+  if (cached) return cached;
+  const response = await fetch(request);
+  if (shouldCacheResponse(response)) {
+    await cache.put(request, response.clone());
+  }
+  return response;
+}
+
+async function staleWhileRevalidate(request, cacheName) {
+  const cache = await caches.open(cacheName);
+  const cached = await cache.match(request);
+  const fresh = fetch(request)
+    .then(async (response) => {
+      if (shouldCacheResponse(response)) {
+        await cache.put(request, response.clone());
+      }
+      return response;
+    })
+    .catch(() => null);
+  return cached || (await fresh) || Response.error();
+}
+
+async function warmStaticCache() {
+  const cache = await caches.open(STATIC_CACHE);
+  await Promise.all(
+    STATIC_PATHS.map(async (path) => {
+      try {
+        const response = await fetch(path);
+        if (shouldCacheResponse(response)) await cache.put(path, response);
+      } catch {}
+    })
+  );
+}
 
 self.addEventListener("install", (event) => {
   // Take over old SWs immediately so a hot-deployed version starts
   // delivering pushes without a manual reload.
-  event.waitUntil(self.skipWaiting());
+  event.waitUntil(
+    (async () => {
+      await warmStaticCache();
+      await self.skipWaiting();
+    })()
+  );
 });
 
 self.addEventListener("activate", (event) => {
-  event.waitUntil(self.clients.claim());
+  event.waitUntil(
+    (async () => {
+      const keep = new Set([STATIC_CACHE, PAGE_CACHE]);
+      const keys = await caches.keys();
+      await Promise.all(
+        keys.map((key) => (keep.has(key) ? undefined : caches.delete(key)))
+      );
+      await self.clients.claim();
+    })()
+  );
+});
+
+self.addEventListener("fetch", (event) => {
+  const { request } = event;
+  if (request.method !== "GET" || !isSameOrigin(request)) return;
+
+  const { pathname } = new URL(request.url);
+  if (
+    pathname.startsWith("/api/") ||
+    pathname.startsWith("/_next/data/") ||
+    pathname.includes("__next_action")
+  ) {
+    return;
+  }
+
+  if (isNextStatic(request)) {
+    event.respondWith(cacheFirst(request, STATIC_CACHE));
+    return;
+  }
+
+  if (request.mode === "navigate") {
+    event.respondWith(staleWhileRevalidate(request, PAGE_CACHE));
+    return;
+  }
+
+  if (isPublicAsset(request)) {
+    event.respondWith(cacheFirst(request, STATIC_CACHE));
+  }
 });
 
 self.addEventListener("push", (event) => {

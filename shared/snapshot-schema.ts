@@ -221,6 +221,7 @@ export const persistedSnapshotSchema = z
     wishlist: z.array(wishlistItem).max(ARR_SMALL),
     achievements: z.array(achievementItem).max(ARR_MED),
     kanban: kanbanState,
+    kanbanDeletedCardIds: z.array(id).max(ARR_MED).optional(),
     recentTasks: z.array(z.string().max(STR_MED)).max(ARR_SMALL),
     foodPresets: z.array(foodPreset).max(ARR_SMALL),
   })

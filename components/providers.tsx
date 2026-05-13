@@ -261,11 +261,9 @@ function balanceSignature(s: ReturnType<typeof useStore.getState>): string {
     JSON.stringify(s.tags),
     JSON.stringify(s.bonuses),
     // Kanban changes don't gate on balance but the user expects them to
-    // sync — fold a stable kanban shape into the signature.
-    s.kanban.inbox.length,
-    s.kanban.Q1.length,
-    s.kanban.Q2.length,
-    s.kanban.Q3.length,
-    s.kanban.Q4.length,
+    // sync. Hash content, not just column lengths, so edits and delete
+    // tombstones are saved too.
+    JSON.stringify(s.kanban),
+    JSON.stringify(s.kanbanDeletedCardIds ?? []),
   ].join("|");
 }

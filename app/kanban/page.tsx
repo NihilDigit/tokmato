@@ -127,6 +127,8 @@ export default function KanbanPage() {
     pointer: { x: number; y: number };
     hoverCol: ColId | null;
   } | null>(null);
+  const dragFrameRef = useRef<number | null>(null);
+  const dragPointerRef = useRef<{ x: number; y: number } | null>(null);
 
   // Mobile state
   const [activeTab, setActiveTab] = useState<ColId>("inbox");
@@ -151,21 +153,54 @@ export default function KanbanPage() {
     x: number,
     y: number
   ) => {
+    if (dragFrameRef.current !== null) {
+      cancelAnimationFrame(dragFrameRef.current);
+      dragFrameRef.current = null;
+    }
+    dragPointerRef.current = null;
     setDrag({ card, fromCol, pointer: { x, y }, hoverCol: hitTestCol(x, y) });
   };
 
   const onCardDragMove = (x: number, y: number) => {
-    setDrag((prev) =>
-      prev ? { ...prev, pointer: { x, y }, hoverCol: hitTestCol(x, y) } : prev
-    );
+    dragPointerRef.current = { x, y };
+    if (dragFrameRef.current !== null) return;
+    dragFrameRef.current = requestAnimationFrame(() => {
+      dragFrameRef.current = null;
+      const pointer = dragPointerRef.current;
+      if (!pointer) return;
+      setDrag((prev) =>
+        prev
+          ? {
+              ...prev,
+              pointer,
+              hoverCol: hitTestCol(pointer.x, pointer.y),
+            }
+          : prev,
+      );
+    });
   };
 
   const onCardDragEnd = (commit: boolean) => {
-    if (commit && drag && drag.hoverCol && drag.hoverCol !== drag.fromCol) {
-      moveCard({ cardId: drag.card.id, toCol: drag.hoverCol });
+    const pointer = dragPointerRef.current ?? drag?.pointer ?? null;
+    const hoverCol = pointer ? hitTestCol(pointer.x, pointer.y) : drag?.hoverCol;
+    if (dragFrameRef.current !== null) {
+      cancelAnimationFrame(dragFrameRef.current);
+      dragFrameRef.current = null;
+    }
+    dragPointerRef.current = null;
+    if (commit && drag && hoverCol && hoverCol !== drag.fromCol) {
+      moveCard({ cardId: drag.card.id, toCol: hoverCol });
     }
     setDrag(null);
   };
+
+  useEffect(() => {
+    return () => {
+      if (dragFrameRef.current !== null) {
+        cancelAnimationFrame(dragFrameRef.current);
+      }
+    };
+  }, []);
 
   const handleMobileMove = (toCol: ColId) => {
     if (!moveMenu) return;
